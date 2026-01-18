@@ -14,7 +14,8 @@ open index.html
 
 **Movement**
 - `←` / `→` — Move left/right
-- `↑` — Jump
+- `↑` — Jump (from ground) / Move up (while airborne)
+- `↓` — Move down (while airborne)
 
 **Attacks (WASD)**
 - `W` — Jab up

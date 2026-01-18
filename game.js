@@ -220,14 +220,26 @@ function update() {
         robot.velocityX *= robot.friction;
     }
 
-    // Jump with arrow up
+    // Jump with arrow up (from ground)
     if (keys['ArrowUp'] && !robot.isJumping) {
         robot.velocityY = robot.jumpForce;
         robot.isJumping = true;
         robot.combo = 0; // Reset combo on new jump
     }
 
-    robot.velocityY += robot.gravity * dt;
+    // Air control - move freely up/down while airborne
+    if (robot.isJumping) {
+        if (keys['ArrowUp']) {
+            robot.velocityY = -robot.speed * 0.5;
+        } else if (keys['ArrowDown']) {
+            robot.velocityY = robot.speed * 0.5;
+        } else {
+            robot.velocityY += robot.gravity * dt;
+        }
+    } else {
+        robot.velocityY += robot.gravity * dt;
+    }
+
     robot.y += robot.velocityY * dt;
 
     // Combo timer decay
