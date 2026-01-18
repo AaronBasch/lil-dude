@@ -5,11 +5,17 @@ const ctx = canvas.getContext('2d');
 canvas.width = 900;
 canvas.height = 500;
 
-// Offscreen canvas for static background (cached)
+// Offscreen canvases for cached elements
 const bgCanvas = document.createElement('canvas');
 bgCanvas.width = canvas.width;
 bgCanvas.height = canvas.height;
 const bgCtx = bgCanvas.getContext('2d');
+
+// Cached lantern glow texture
+const glowCanvas = document.createElement('canvas');
+glowCanvas.width = 80;
+glowCanvas.height = 80;
+const glowCtx = glowCanvas.getContext('2d');
 
 const keys = {};
 const GROUND_Y = canvas.height - 60;
@@ -21,6 +27,22 @@ const SCROLL_SPEED = 0.8;
 // Slowmo system
 let slowmo = false;
 let slowmoFactor = 1;
+
+// Ambient effects
+const fireflies = [];
+const shootingStars = [];
+const lanternParticles = [];
+
+// Initialize fireflies
+for (let i = 0; i < 15; i++) {
+    fireflies.push({
+        x: Math.random() * canvas.width,
+        y: 100 + Math.random() * (GROUND_Y - 150),
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.3 + Math.random() * 0.4,
+        drift: Math.random() * Math.PI * 2
+    });
+}
 
 // Foreground tree shadows - positioned in world space with varied shapes
 // type: 0=pointed pine, 1=round oak, 2=thin birch, 3=bushy spruce
@@ -75,30 +97,31 @@ const robot = {
 };
 
 // Targets - paper lanterns that bob up and down
+// Colors by height: warm orange (ground), soft pink (low), light blue (mid), pale violet (high)
 let bobTime = 0;
 const targets = [
-    // Ground level
-    { worldX: 400, x: 400, baseY: GROUND_Y - 25, y: 0, radius: 14, alive: true, phase: 0 },
-    { worldX: 900, x: 900, baseY: GROUND_Y - 20, y: 0, radius: 12, alive: true, phase: 1.2 },
-    { worldX: 1500, x: 1500, baseY: GROUND_Y - 25, y: 0, radius: 13, alive: true, phase: 2.5 },
-    { worldX: 2100, x: 2100, baseY: GROUND_Y - 22, y: 0, radius: 12, alive: true, phase: 0.8 },
-    // Low air
-    { worldX: 300, x: 300, baseY: GROUND_Y - 70, y: 0, radius: 12, alive: true, phase: 1.8 },
-    { worldX: 600, x: 600, baseY: GROUND_Y - 90, y: 0, radius: 13, alive: true, phase: 3.1 },
-    { worldX: 1000, x: 1000, baseY: GROUND_Y - 80, y: 0, radius: 12, alive: true, phase: 0.5 },
-    { worldX: 1400, x: 1400, baseY: GROUND_Y - 75, y: 0, radius: 14, alive: true, phase: 2.2 },
-    { worldX: 1800, x: 1800, baseY: GROUND_Y - 85, y: 0, radius: 12, alive: true, phase: 4.0 },
-    // Mid air
-    { worldX: 450, x: 450, baseY: GROUND_Y - 130, y: 0, radius: 11, alive: true, phase: 1.5 },
-    { worldX: 750, x: 750, baseY: GROUND_Y - 150, y: 0, radius: 12, alive: true, phase: 2.8 },
-    { worldX: 1100, x: 1100, baseY: GROUND_Y - 140, y: 0, radius: 13, alive: true, phase: 0.3 },
-    { worldX: 1600, x: 1600, baseY: GROUND_Y - 135, y: 0, radius: 11, alive: true, phase: 3.5 },
-    { worldX: 1950, x: 1950, baseY: GROUND_Y - 145, y: 0, radius: 12, alive: true, phase: 1.1 },
-    // High air
-    { worldX: 550, x: 550, baseY: GROUND_Y - 190, y: 0, radius: 10, alive: true, phase: 2.0 },
-    { worldX: 850, x: 850, baseY: GROUND_Y - 210, y: 0, radius: 11, alive: true, phase: 3.8 },
-    { worldX: 1250, x: 1250, baseY: GROUND_Y - 200, y: 0, radius: 10, alive: true, phase: 0.9 },
-    { worldX: 1700, x: 1700, baseY: GROUND_Y - 195, y: 0, radius: 11, alive: true, phase: 2.6 },
+    // Ground level - warm orange
+    { worldX: 400, x: 400, baseY: GROUND_Y - 25, y: 0, radius: 14, alive: true, phase: 0, hue: [255, 180, 100] },
+    { worldX: 900, x: 900, baseY: GROUND_Y - 20, y: 0, radius: 12, alive: true, phase: 1.2, hue: [255, 170, 90] },
+    { worldX: 1500, x: 1500, baseY: GROUND_Y - 25, y: 0, radius: 13, alive: true, phase: 2.5, hue: [255, 190, 110] },
+    { worldX: 2100, x: 2100, baseY: GROUND_Y - 22, y: 0, radius: 12, alive: true, phase: 0.8, hue: [255, 175, 95] },
+    // Low air - soft pink
+    { worldX: 300, x: 300, baseY: GROUND_Y - 70, y: 0, radius: 12, alive: true, phase: 1.8, hue: [255, 180, 190] },
+    { worldX: 600, x: 600, baseY: GROUND_Y - 90, y: 0, radius: 13, alive: true, phase: 3.1, hue: [255, 170, 180] },
+    { worldX: 1000, x: 1000, baseY: GROUND_Y - 80, y: 0, radius: 12, alive: true, phase: 0.5, hue: [255, 185, 195] },
+    { worldX: 1400, x: 1400, baseY: GROUND_Y - 75, y: 0, radius: 14, alive: true, phase: 2.2, hue: [255, 175, 185] },
+    { worldX: 1800, x: 1800, baseY: GROUND_Y - 85, y: 0, radius: 12, alive: true, phase: 4.0, hue: [255, 180, 190] },
+    // Mid air - light blue
+    { worldX: 450, x: 450, baseY: GROUND_Y - 130, y: 0, radius: 11, alive: true, phase: 1.5, hue: [180, 220, 255] },
+    { worldX: 750, x: 750, baseY: GROUND_Y - 150, y: 0, radius: 12, alive: true, phase: 2.8, hue: [170, 210, 255] },
+    { worldX: 1100, x: 1100, baseY: GROUND_Y - 140, y: 0, radius: 13, alive: true, phase: 0.3, hue: [185, 225, 255] },
+    { worldX: 1600, x: 1600, baseY: GROUND_Y - 135, y: 0, radius: 11, alive: true, phase: 3.5, hue: [175, 215, 255] },
+    { worldX: 1950, x: 1950, baseY: GROUND_Y - 145, y: 0, radius: 12, alive: true, phase: 1.1, hue: [180, 220, 255] },
+    // High air - pale violet
+    { worldX: 550, x: 550, baseY: GROUND_Y - 190, y: 0, radius: 10, alive: true, phase: 2.0, hue: [220, 180, 255] },
+    { worldX: 850, x: 850, baseY: GROUND_Y - 210, y: 0, radius: 11, alive: true, phase: 3.8, hue: [210, 170, 255] },
+    { worldX: 1250, x: 1250, baseY: GROUND_Y - 200, y: 0, radius: 10, alive: true, phase: 0.9, hue: [225, 185, 255] },
+    { worldX: 1700, x: 1700, baseY: GROUND_Y - 195, y: 0, radius: 11, alive: true, phase: 2.6, hue: [215, 175, 255] },
 ];
 
 // Input handling
@@ -317,6 +340,49 @@ function update() {
         p.alpha -= 0.15;
         return p.alpha > 0;
     });
+
+    // Update lantern particles
+    for (let i = lanternParticles.length - 1; i >= 0; i--) {
+        const p = lanternParticles[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vy += 0.1 * dt;
+        p.alpha -= 0.02 * dt;
+        if (p.alpha <= 0) lanternParticles.splice(i, 1);
+    }
+
+    // Update fireflies
+    for (let i = 0; i < fireflies.length; i++) {
+        const f = fireflies[i];
+        f.phase += 0.02 * dt;
+        f.drift += 0.01 * dt;
+        f.x += Math.sin(f.drift) * f.speed * dt;
+        f.y += Math.cos(f.drift * 0.7) * f.speed * 0.5 * dt;
+        // Wrap around
+        if (f.x < -20) f.x = canvas.width + 20;
+        if (f.x > canvas.width + 20) f.x = -20;
+    }
+
+    // Occasional shooting star
+    if (Math.random() < 0.002 * dt && shootingStars.length < 2) {
+        shootingStars.push({
+            x: Math.random() * canvas.width,
+            y: 20 + Math.random() * 80,
+            vx: 8 + Math.random() * 6,
+            vy: 2 + Math.random() * 2,
+            alpha: 1,
+            length: 40 + Math.random() * 30
+        });
+    }
+
+    // Update shooting stars
+    for (let i = shootingStars.length - 1; i >= 0; i--) {
+        const s = shootingStars[i];
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+        s.alpha -= 0.015 * dt;
+        if (s.alpha <= 0 || s.x > canvas.width + 50) shootingStars.splice(i, 1);
+    }
 }
 
 function checkTargetCollisions() {
@@ -356,6 +422,21 @@ function checkTargetCollisions() {
                 target.alive = false;
                 robot.screenShake.x = (Math.random() - 0.5) * 8;
                 robot.screenShake.y = (Math.random() - 0.5) * 8;
+
+                // Spawn lantern destruction particles
+                for (let p = 0; p < 8; p++) {
+                    const angle = (p / 8) * Math.PI * 2 + Math.random() * 0.5;
+                    const speed = 2 + Math.random() * 3;
+                    lanternParticles.push({
+                        x: target.x,
+                        y: target.y,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed - 2,
+                        size: 3 + Math.random() * 4,
+                        alpha: 1,
+                        hue: target.hue
+                    });
+                }
 
                 // Combo system
                 if (robot.isJumping) {
@@ -491,6 +572,14 @@ function addTrailPoint() {
 
 // Cache static background once at startup
 function initBackground() {
+    // Create cached lantern glow (white, will be tinted when drawn)
+    const glowGrad = glowCtx.createRadialGradient(40, 40, 0, 40, 40, 40);
+    glowGrad.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+    glowGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.15)');
+    glowGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    glowCtx.fillStyle = glowGrad;
+    glowCtx.fillRect(0, 0, 80, 80);
+
     // Night sky gradient
     const skyGrad = bgCtx.createLinearGradient(0, 0, 0, GROUND_Y);
     skyGrad.addColorStop(0, '#0a0a18');
@@ -511,16 +600,16 @@ function initBackground() {
     bgCtx.fillStyle = moonGlow;
     bgCtx.fillRect(600, 0, 300, 250);
 
-    // Stars (sparse) - fixed alpha values
+    // Stars (sparse)
     bgCtx.fillStyle = '#ffffff';
-    const stars = [[120, 45, 0.5], [280, 70, 0.6], [450, 35, 0.4], [600, 90, 0.55], [180, 120, 0.45], [520, 60, 0.5], [850, 50, 0.6], [80, 80, 0.5]];
-    stars.forEach(([sx, sy, a]) => {
-        bgCtx.globalAlpha = a;
-        bgCtx.fillRect(sx, sy, 2, 2);
-    });
+    const stars = [[120, 45, 0.5], [280, 70, 0.6], [450, 35, 0.4], [600, 90, 0.55], [180, 120, 0.45], [520, 60, 0.5], [850, 50, 0.6], [80, 80, 0.5], [320, 30, 0.45], [720, 65, 0.5]];
+    for (let i = 0; i < stars.length; i++) {
+        bgCtx.globalAlpha = stars[i][2];
+        bgCtx.fillRect(stars[i][0], stars[i][1], 2, 2);
+    }
     bgCtx.globalAlpha = 1;
 
-    // Distant mountains (back layer)
+    // Distant mountains
     bgCtx.fillStyle = '#1a1a2e';
     bgCtx.beginPath();
     bgCtx.moveTo(0, GROUND_Y - 80);
@@ -560,6 +649,39 @@ function drawMoonlitBackground() {
     ctx.drawImage(bgCanvas, 0, 0);
 }
 
+function drawShootingStars() {
+    for (let i = 0; i < shootingStars.length; i++) {
+        const s = shootingStars[i];
+        ctx.strokeStyle = `rgba(255, 255, 255, ${s.alpha})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(s.x | 0, s.y | 0);
+        ctx.lineTo((s.x - s.vx * 4) | 0, (s.y - s.vy * 4) | 0);
+        ctx.stroke();
+    }
+}
+
+function drawFireflies() {
+    for (let i = 0; i < fireflies.length; i++) {
+        const f = fireflies[i];
+        const brightness = 0.3 + Math.sin(f.phase) * 0.3;
+        ctx.fillStyle = `rgba(200, 255, 150, ${brightness})`;
+        ctx.beginPath();
+        ctx.arc(f.x | 0, f.y | 0, 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+function drawLanternParticles() {
+    for (let i = 0; i < lanternParticles.length; i++) {
+        const p = lanternParticles[i];
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = `rgb(${p.hue[0]}, ${p.hue[1]}, ${p.hue[2]})`;
+        ctx.fillRect((p.x - p.size / 2) | 0, (p.y - p.size / 2) | 0, p.size | 0, p.size | 0);
+    }
+    ctx.globalAlpha = 1;
+}
+
 // Draw background tree shadows with parallax scrolling (optimized)
 function drawTreeShadows() {
     ctx.fillStyle = '#080814';
@@ -587,9 +709,18 @@ function drawTreeShadows() {
 
 function draw() {
     ctx.save();
-    ctx.translate(robot.screenShake.x, robot.screenShake.y);
+    ctx.translate(robot.screenShake.x | 0, robot.screenShake.y | 0);
 
     drawMoonlitBackground();
+    drawShootingStars();
+    drawFireflies();
+
+    // Combo warm tint overlay
+    if (robot.combo > 2 && robot.isJumping) {
+        const intensity = Math.min(robot.combo * 0.03, 0.15);
+        ctx.fillStyle = `rgba(255, 150, 50, ${intensity})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 
     // Slowmo visual effect - blue tint overlay
     if (slowmo) {
@@ -600,35 +731,49 @@ function draw() {
     drawTreeShadows();
     drawGround();
     drawTargets();
+    drawLanternParticles();
     drawSpeedLines();
     drawDustParticles();
     drawAfterimages();
     drawStrikeTrail();
-    drawRobot(robot.x, robot.y, 1, robot.armAngle, robot.bladeAngle, robot.wheelRotation, robot.bladeExtension, false, robot.armExtension);
+    drawRobot(robot.x | 0, robot.y | 0, 1, robot.armAngle, robot.bladeAngle, robot.wheelRotation, robot.bladeExtension, false, robot.armExtension);
 
     // Slowmo radial lines effect
     if (slowmo) {
         ctx.strokeStyle = 'rgba(150, 180, 255, 0.3)';
         ctx.lineWidth = 1;
+        const rx = robot.x | 0;
+        const ry = (robot.y - 10) | 0;
         for (let i = 0; i < 12; i++) {
             const angle = (i / 12) * Math.PI * 2;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
             ctx.beginPath();
-            ctx.moveTo(robot.x + Math.cos(angle) * 40, robot.y - 10 + Math.sin(angle) * 40);
-            ctx.lineTo(robot.x + Math.cos(angle) * 200, robot.y - 10 + Math.sin(angle) * 200);
+            ctx.moveTo(rx + cos * 40, ry + sin * 40);
+            ctx.lineTo(rx + cos * 200, ry + sin * 200);
             ctx.stroke();
         }
     }
 
-    // Combo display
+    // Combo display with scaling effect
     if (robot.combo > 1 && robot.isJumping) {
-        ctx.fillStyle = '#ffcc00';
-        ctx.font = 'bold 32px monospace';
-        ctx.fillText(`${robot.combo}x COMBO!`, canvas.width / 2 - 80, 80);
+        const scale = 1 + Math.min(robot.combo * 0.1, 0.5);
+        const shake = robot.combo > 3 ? (Math.random() - 0.5) * robot.combo : 0;
+        ctx.save();
+        ctx.translate(canvas.width / 2 + shake, 80);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = '#ffdd44';
+        ctx.font = 'bold 28px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${robot.combo}x COMBO!`, 0, 0);
+        ctx.restore();
     } else if (robot.comboTimer > 0 && robot.combo > 1) {
         ctx.globalAlpha = robot.comboTimer / 120;
-        ctx.fillStyle = '#ffcc00';
-        ctx.font = 'bold 32px monospace';
-        ctx.fillText(`${robot.combo}x COMBO!`, canvas.width / 2 - 80, 80);
+        ctx.fillStyle = '#ffdd44';
+        ctx.font = 'bold 28px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${robot.combo}x COMBO!`, canvas.width / 2, 80);
+        ctx.textAlign = 'left';
         ctx.globalAlpha = 1;
     }
 
@@ -652,7 +797,7 @@ function drawGround() {
     ctx.strokeStyle = '#5a5a80';
     groundScrollPos = ((groundScrollPos - robot.velocityX * 0.5) % 30 + 30) % 30;
 
-    for (let x = groundScrollPos; x < canvas.width; x += 30) {
+    for (let x = groundScrollPos | 0; x < canvas.width; x += 30) {
         ctx.beginPath();
         ctx.moveTo(x, GROUND_Y + 14);
         ctx.lineTo(x, GROUND_Y + 20);
@@ -665,34 +810,36 @@ function drawTargets() {
         const t = targets[i];
         if (!t.alive || t.x < -50 || t.x > 950) continue;
 
+        const x = t.x | 0;
+        const y = t.y | 0;
         const size = t.radius;
+        const h = t.hue;
 
-        // Warm glow
-        const glow = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, size * 3);
-        glow.addColorStop(0, 'rgba(255, 180, 100, 0.35)');
-        glow.addColorStop(0.5, 'rgba(255, 140, 60, 0.15)');
-        glow.addColorStop(1, 'rgba(255, 100, 40, 0)');
-        ctx.fillStyle = glow;
-        ctx.fillRect(t.x - size * 3, t.y - size * 3, size * 6, size * 6);
+        // Glow using cached texture with color tint
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.6;
+        ctx.drawImage(glowCanvas, x - 40, y - 40);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
 
-        // Lantern body
-        ctx.fillStyle = '#ffdd99';
+        // Lantern body with color
+        ctx.fillStyle = `rgb(${h[0]}, ${h[1]}, ${h[2]})`;
         ctx.beginPath();
-        ctx.ellipse(t.x, t.y, size * 0.7, size, 0, 0, Math.PI * 2);
+        ctx.ellipse(x, y, size * 0.7, size, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Inner glow
-        ctx.fillStyle = 'rgba(255, 240, 200, 0.9)';
+        // Inner glow (brighter)
+        ctx.fillStyle = `rgba(${Math.min(255, h[0] + 40)}, ${Math.min(255, h[1] + 40)}, ${Math.min(255, h[2] + 40)}, 0.9)`;
         ctx.beginPath();
-        ctx.ellipse(t.x, t.y, size * 0.4, size * 0.6, 0, 0, Math.PI * 2);
+        ctx.ellipse(x, y, size * 0.4, size * 0.6, 0, 0, Math.PI * 2);
         ctx.fill();
 
         // String
-        ctx.strokeStyle = '#664422';
+        ctx.strokeStyle = '#443322';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(t.x, t.y - size);
-        ctx.lineTo(t.x, t.y - size - 15);
+        ctx.moveTo(x, y - size);
+        ctx.lineTo(x, (y - size - 15) | 0);
         ctx.stroke();
     }
 }
@@ -705,8 +852,8 @@ function drawSpeedLines() {
         const line = robot.speedLines[i];
         ctx.globalAlpha = line.alpha;
         ctx.beginPath();
-        ctx.moveTo(line.x, line.y);
-        ctx.lineTo(line.x + line.length * dir, line.y);
+        ctx.moveTo(line.x | 0, line.y | 0);
+        ctx.lineTo((line.x + line.length * dir) | 0, line.y | 0);
         ctx.stroke();
     }
     ctx.globalAlpha = 1;
@@ -717,7 +864,7 @@ function drawDustParticles() {
     for (let i = 0; i < robot.dustParticles.length; i++) {
         const p = robot.dustParticles[i];
         ctx.globalAlpha = p.alpha;
-        ctx.fillRect(p.x, p.y, p.size, p.size);
+        ctx.fillRect(p.x | 0, p.y | 0, p.size | 0, p.size | 0);
     }
     ctx.globalAlpha = 1;
 }
@@ -725,7 +872,7 @@ function drawDustParticles() {
 function drawAfterimages() {
     for (let i = 0; i < robot.afterimages.length; i++) {
         const img = robot.afterimages[i];
-        drawRobot(img.x, img.y, img.alpha * 0.3, img.armAngle, 0, img.wheelRotation, img.bladeExtension, true, img.armExtension);
+        drawRobot(img.x | 0, img.y | 0, img.alpha * 0.3, img.armAngle, 0, img.wheelRotation, img.bladeExtension, true, img.armExtension);
     }
 }
 
@@ -738,8 +885,8 @@ function drawStrikeTrail() {
         const p2 = robot.strikeTrail[i];
         ctx.strokeStyle = `rgba(255, 255, 255, ${p2.alpha})`;
         ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
+        ctx.moveTo(p1.x | 0, p1.y | 0);
+        ctx.lineTo(p2.x | 0, p2.y | 0);
         ctx.stroke();
     }
 }
