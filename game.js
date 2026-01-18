@@ -5,60 +5,48 @@ const ctx = canvas.getContext('2d');
 canvas.width = 900;
 canvas.height = 500;
 
-// Offscreen canvases for cached elements
+// Offscreen canvas for cached background
 const bgCanvas = document.createElement('canvas');
 bgCanvas.width = canvas.width;
 bgCanvas.height = canvas.height;
 const bgCtx = bgCanvas.getContext('2d');
 
-// Cached lantern glow texture
-const glowCanvas = document.createElement('canvas');
-glowCanvas.width = 80;
-glowCanvas.height = 80;
-const glowCtx = glowCanvas.getContext('2d');
-
 const keys = {};
 const GROUND_Y = canvas.height - 60;
 
-// World scrolling for parallax effect
+// Minimal color palette
+const COLORS = {
+    bg: '#08080c',
+    mid: '#151520',
+    dim: '#252535',
+    line: '#404055',
+    bright: '#ffffff'
+};
+
+// World scrolling
 let worldScroll = 0;
-const SCROLL_SPEED = 0.8;
 
 // Slowmo system
 let slowmo = false;
 let slowmoFactor = 1;
 
-// Ambient effects
-const fireflies = [];
-const shootingStars = [];
-const lanternParticles = [];
+// Hit particles (minimal)
+const hitParticles = [];
 
-// Initialize fireflies
-for (let i = 0; i < 15; i++) {
-    fireflies.push({
-        x: Math.random() * canvas.width,
-        y: 100 + Math.random() * (GROUND_Y - 150),
-        phase: Math.random() * Math.PI * 2,
-        speed: 0.3 + Math.random() * 0.4,
-        drift: Math.random() * Math.PI * 2
-    });
-}
-
-// Foreground tree shadows - positioned in world space with varied shapes
-// type: 0=pointed pine, 1=round oak, 2=thin birch, 3=bushy spruce
-const treeShadows = [
-    { worldX: -100, height: 320, width: 75, type: 3, lean: 0.05 },
-    { worldX: 150, height: 180, width: 35, type: 2, lean: -0.08 },
-    { worldX: 380, height: 260, width: 55, type: 0, lean: 0.02 },
-    { worldX: 520, height: 140, width: 50, type: 1, lean: 0 },
-    { worldX: 750, height: 290, width: 65, type: 3, lean: -0.03 },
-    { worldX: 950, height: 200, width: 40, type: 2, lean: 0.1 },
-    { worldX: 1150, height: 350, width: 80, type: 0, lean: -0.02 },
-    { worldX: 1350, height: 170, width: 60, type: 1, lean: 0.05 },
-    { worldX: 1550, height: 240, width: 45, type: 2, lean: -0.06 },
-    { worldX: 1780, height: 310, width: 70, type: 3, lean: 0.03 },
-    { worldX: 1950, height: 190, width: 55, type: 1, lean: -0.04 },
-    { worldX: 2150, height: 280, width: 50, type: 0, lean: 0.07 },
+// Foreground silhouettes - clean triangles
+const silhouettes = [
+    { worldX: -100, height: 320, width: 60 },
+    { worldX: 150, height: 180, width: 30 },
+    { worldX: 380, height: 260, width: 45 },
+    { worldX: 520, height: 140, width: 35 },
+    { worldX: 750, height: 290, width: 55 },
+    { worldX: 950, height: 200, width: 35 },
+    { worldX: 1150, height: 350, width: 65 },
+    { worldX: 1350, height: 170, width: 40 },
+    { worldX: 1550, height: 240, width: 38 },
+    { worldX: 1780, height: 310, width: 58 },
+    { worldX: 1950, height: 190, width: 42 },
+    { worldX: 2150, height: 280, width: 48 },
 ];
 
 // Robot character
@@ -74,7 +62,6 @@ const robot = {
     gravity: 0.6,
     friction: 0.85,
 
-    // Combo system
     combo: 0,
     comboTimer: 0,
     bestCombo: 0,
@@ -91,42 +78,36 @@ const robot = {
 
     wheelRotation: 0,
     afterimages: [],
-    speedLines: [],
-    dustParticles: [],
     screenShake: { x: 0, y: 0 }
 };
 
-// Targets - paper lanterns that bob up and down
-// Colors by height: warm orange (ground), soft pink (low), light blue (mid), pale violet (high)
-let bobTime = 0;
+// Targets - simple nodes
 const targets = [
-    // Ground level - warm orange
-    { worldX: 400, x: 400, baseY: GROUND_Y - 25, y: 0, radius: 14, alive: true, phase: 0, hue: [255, 180, 100] },
-    { worldX: 900, x: 900, baseY: GROUND_Y - 20, y: 0, radius: 12, alive: true, phase: 1.2, hue: [255, 170, 90] },
-    { worldX: 1500, x: 1500, baseY: GROUND_Y - 25, y: 0, radius: 13, alive: true, phase: 2.5, hue: [255, 190, 110] },
-    { worldX: 2100, x: 2100, baseY: GROUND_Y - 22, y: 0, radius: 12, alive: true, phase: 0.8, hue: [255, 175, 95] },
-    // Low air - soft pink
-    { worldX: 300, x: 300, baseY: GROUND_Y - 70, y: 0, radius: 12, alive: true, phase: 1.8, hue: [255, 180, 190] },
-    { worldX: 600, x: 600, baseY: GROUND_Y - 90, y: 0, radius: 13, alive: true, phase: 3.1, hue: [255, 170, 180] },
-    { worldX: 1000, x: 1000, baseY: GROUND_Y - 80, y: 0, radius: 12, alive: true, phase: 0.5, hue: [255, 185, 195] },
-    { worldX: 1400, x: 1400, baseY: GROUND_Y - 75, y: 0, radius: 14, alive: true, phase: 2.2, hue: [255, 175, 185] },
-    { worldX: 1800, x: 1800, baseY: GROUND_Y - 85, y: 0, radius: 12, alive: true, phase: 4.0, hue: [255, 180, 190] },
-    // Mid air - light blue
-    { worldX: 450, x: 450, baseY: GROUND_Y - 130, y: 0, radius: 11, alive: true, phase: 1.5, hue: [180, 220, 255] },
-    { worldX: 750, x: 750, baseY: GROUND_Y - 150, y: 0, radius: 12, alive: true, phase: 2.8, hue: [170, 210, 255] },
-    { worldX: 1100, x: 1100, baseY: GROUND_Y - 140, y: 0, radius: 13, alive: true, phase: 0.3, hue: [185, 225, 255] },
-    { worldX: 1600, x: 1600, baseY: GROUND_Y - 135, y: 0, radius: 11, alive: true, phase: 3.5, hue: [175, 215, 255] },
-    { worldX: 1950, x: 1950, baseY: GROUND_Y - 145, y: 0, radius: 12, alive: true, phase: 1.1, hue: [180, 220, 255] },
-    // High air - pale violet
-    { worldX: 550, x: 550, baseY: GROUND_Y - 190, y: 0, radius: 10, alive: true, phase: 2.0, hue: [220, 180, 255] },
-    { worldX: 850, x: 850, baseY: GROUND_Y - 210, y: 0, radius: 11, alive: true, phase: 3.8, hue: [210, 170, 255] },
-    { worldX: 1250, x: 1250, baseY: GROUND_Y - 200, y: 0, radius: 10, alive: true, phase: 0.9, hue: [225, 185, 255] },
-    { worldX: 1700, x: 1700, baseY: GROUND_Y - 195, y: 0, radius: 11, alive: true, phase: 2.6, hue: [215, 175, 255] },
+    // Ground level
+    { worldX: 400, x: 400, baseY: GROUND_Y - 25, y: 0, radius: 8, alive: true },
+    { worldX: 900, x: 900, baseY: GROUND_Y - 20, y: 0, radius: 7, alive: true },
+    { worldX: 1500, x: 1500, baseY: GROUND_Y - 25, y: 0, radius: 8, alive: true },
+    { worldX: 2100, x: 2100, baseY: GROUND_Y - 22, y: 0, radius: 7, alive: true },
+    // Low air
+    { worldX: 300, x: 300, baseY: GROUND_Y - 70, y: 0, radius: 7, alive: true },
+    { worldX: 600, x: 600, baseY: GROUND_Y - 90, y: 0, radius: 8, alive: true },
+    { worldX: 1000, x: 1000, baseY: GROUND_Y - 80, y: 0, radius: 7, alive: true },
+    { worldX: 1400, x: 1400, baseY: GROUND_Y - 75, y: 0, radius: 8, alive: true },
+    { worldX: 1800, x: 1800, baseY: GROUND_Y - 85, y: 0, radius: 7, alive: true },
+    // Mid air
+    { worldX: 450, x: 450, baseY: GROUND_Y - 130, y: 0, radius: 6, alive: true },
+    { worldX: 750, x: 750, baseY: GROUND_Y - 150, y: 0, radius: 7, alive: true },
+    { worldX: 1100, x: 1100, baseY: GROUND_Y - 140, y: 0, radius: 7, alive: true },
+    { worldX: 1600, x: 1600, baseY: GROUND_Y - 135, y: 0, radius: 6, alive: true },
+    { worldX: 1950, x: 1950, baseY: GROUND_Y - 145, y: 0, radius: 7, alive: true },
+    // High air
+    { worldX: 550, x: 550, baseY: GROUND_Y - 190, y: 0, radius: 5, alive: true },
+    { worldX: 850, x: 850, baseY: GROUND_Y - 210, y: 0, radius: 6, alive: true },
+    { worldX: 1250, x: 1250, baseY: GROUND_Y - 200, y: 0, radius: 5, alive: true },
+    { worldX: 1700, x: 1700, baseY: GROUND_Y - 195, y: 0, radius: 6, alive: true },
 ];
 
 // Input handling
-// Movement: Arrow keys (left/right to move, up or space to jump)
-// Attacks: WASD (A=left, D=right, W=up, S=down)
 document.addEventListener('keydown', (e) => {
     const key = e.key.toLowerCase();
 
@@ -134,16 +115,10 @@ document.addEventListener('keydown', (e) => {
         keys[key] = true;
         keys[e.key] = true;
 
-        // WASD for attacks
-        if (key === 'a') {
-            handleAttackPress('left');
-        } else if (key === 'd') {
-            handleAttackPress('right');
-        } else if (key === 'w') {
-            handleAttackPress('up');
-        } else if (key === 's') {
-            handleAttackPress('down');
-        }
+        if (key === 'a') handleAttackPress('left');
+        else if (key === 'd') handleAttackPress('right');
+        else if (key === 'w') handleAttackPress('up');
+        else if (key === 's') handleAttackPress('down');
     }
 
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
@@ -156,37 +131,26 @@ document.addEventListener('keyup', (e) => {
     keys[key] = false;
     keys[e.key] = false;
 
-    // Attack release
-    if (key === 'a') {
-        handleAttackRelease('left');
-    } else if (key === 'd') {
-        handleAttackRelease('right');
-    } else if (key === 'w') {
-        handleAttackRelease('up');
-    } else if (key === 's') {
-        handleAttackRelease('down');
-    }
+    if (key === 'a') handleAttackRelease('left');
+    else if (key === 'd') handleAttackRelease('right');
+    else if (key === 'w') handleAttackRelease('up');
+    else if (key === 's') handleAttackRelease('down');
 });
 
 function handleAttackPress(direction) {
     if (robot.attackHeld && robot.attackHeld !== direction) {
-        // Combo - determine swing type
         const held = robot.attackHeld;
         if ((held === 'up' && direction === 'down') || (held === 'down' && direction === 'up')) {
-            // Vertical combo
             robot.attackState = held === 'up' ? 'swing-ud' : 'swing-du';
         } else if ((held === 'left' && direction === 'right') || (held === 'right' && direction === 'left')) {
-            // Horizontal combo
             robot.attackState = held === 'left' ? 'swing-lr' : 'swing-rl';
         } else {
-            // Diagonal combo
             robot.attackState = 'swing-diag';
         }
         robot.attackProgress = 0;
         robot.strikeTrail = [];
         robot.attackHeld = null;
     } else {
-        // Single jab
         if (direction === 'left') robot.attackState = 'jab-left';
         else if (direction === 'right') robot.attackState = 'jab-right';
         else if (direction === 'up') robot.attackState = 'jab-up';
@@ -205,13 +169,11 @@ function handleAttackRelease(direction) {
 }
 
 function update() {
-    // Slowmo when holding space (while in air)
     slowmo = keys[' '] && robot.isJumping;
     slowmoFactor = slowmo ? 0.25 : 1;
-
     const dt = slowmoFactor;
 
-    // Movement with arrow keys
+    // Movement
     if (keys['ArrowLeft']) {
         robot.velocityX = -robot.speed;
     } else if (keys['ArrowRight']) {
@@ -220,14 +182,14 @@ function update() {
         robot.velocityX *= robot.friction;
     }
 
-    // Jump with arrow up (from ground)
+    // Jump from ground
     if (keys['ArrowUp'] && !robot.isJumping) {
         robot.velocityY = robot.jumpForce;
         robot.isJumping = true;
-        robot.combo = 0; // Reset combo on new jump
+        robot.combo = 0;
     }
 
-    // Air control - move freely up/down while airborne
+    // Air control
     if (robot.isJumping) {
         if (keys['ArrowUp']) {
             robot.velocityY = -robot.speed * 0.5;
@@ -242,27 +204,22 @@ function update() {
 
     robot.y += robot.velocityY * dt;
 
-    // Combo timer decay
-    if (robot.comboTimer > 0) {
-        robot.comboTimer -= dt;
-    }
+    if (robot.comboTimer > 0) robot.comboTimer -= dt;
 
     if (robot.y >= GROUND_Y) {
         robot.y = GROUND_Y;
         robot.velocityY = 0;
         if (robot.isJumping && robot.combo > 1) {
-            robot.comboTimer = 120; // Show combo for 2 seconds
+            robot.comboTimer = 120;
         }
         robot.isJumping = false;
     }
 
-    // Move robot on screen, scroll world only at edges
+    // World scroll at edges
     const LEFT_EDGE = 150;
     const RIGHT_EDGE = canvas.width - 150;
-
     robot.x += robot.velocityX * dt;
 
-    // Scroll world when robot hits edge zones
     if (robot.x < LEFT_EDGE) {
         worldScroll += robot.x - LEFT_EDGE;
         robot.x = LEFT_EDGE;
@@ -271,11 +228,10 @@ function update() {
         robot.x = RIGHT_EDGE;
     }
 
-    // Update target screen positions and bobbing
-    bobTime += 0.03 * dt;
+    // Update targets
     for (let i = 0; i < targets.length; i++) {
         targets[i].x = targets[i].worldX - worldScroll;
-        targets[i].y = targets[i].baseY + Math.sin(bobTime + targets[i].phase) * 8;
+        targets[i].y = targets[i].baseY;
     }
 
     robot.wheelRotation += robot.velocityX * 0.15;
@@ -285,67 +241,22 @@ function update() {
     robot.screenShake.x *= 0.8;
     robot.screenShake.y *= 0.8;
 
-    // Speed effects (reduced frequency)
-    const absVel = Math.abs(robot.velocityX);
-    if (absVel > 2) {
-        // Afterimages - less frequent
-        if (Math.random() > 0.5) {
-            robot.afterimages.push({
-                x: robot.x,
-                y: robot.y,
-                alpha: 0.6,
-                wheelRotation: robot.wheelRotation,
-                armAngle: robot.armAngle,
-                armExtension: robot.armExtension,
-                bladeExtension: robot.bladeExtension
-            });
-        }
-
-        // Speed lines - reduced
-        if (Math.random() > 0.6) {
-            const direction = robot.velocityX > 0 ? -1 : 1;
-            robot.speedLines.push({
-                x: robot.x + direction * 30 + Math.random() * 100 * direction,
-                y: robot.y - 8 + (Math.random() - 0.5) * 50,
-                length: 30 + Math.random() * 50,
-                alpha: 0.7,
-                speed: absVel * 2
-            });
-        }
-
-        // Dust - reduced
-        if (!robot.isJumping && Math.random() > 0.7) {
-            const direction = robot.velocityX > 0 ? -1 : 1;
-            robot.dustParticles.push({
-                x: robot.x + direction * 4,
-                y: GROUND_Y,
-                vx: direction * (2 + Math.random() * 3),
-                vy: -Math.random() * 3,
-                size: 2 + Math.random() * 3,
-                alpha: 0.5
-            });
-        }
+    // Afterimages
+    if (Math.abs(robot.velocityX) > 2 && Math.random() > 0.6) {
+        robot.afterimages.push({
+            x: robot.x,
+            y: robot.y,
+            alpha: 0.4,
+            wheelRotation: robot.wheelRotation,
+            armAngle: robot.armAngle,
+            armExtension: robot.armExtension,
+            bladeExtension: robot.bladeExtension
+        });
     }
 
-    // Update effects
     robot.afterimages = robot.afterimages.filter(img => {
-        img.alpha -= 0.1;
+        img.alpha -= 0.08;
         return img.alpha > 0;
-    });
-
-    robot.speedLines = robot.speedLines.filter(line => {
-        const direction = robot.velocityX > 0 ? -1 : 1;
-        line.x += direction * line.speed;
-        line.alpha -= 0.06;
-        return line.alpha > 0;
-    });
-
-    robot.dustParticles = robot.dustParticles.filter(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vy += 0.15;
-        p.alpha -= 0.04;
-        return p.alpha > 0 && p.y <= GROUND_Y;
     });
 
     robot.strikeTrail = robot.strikeTrail.filter(p => {
@@ -353,47 +264,14 @@ function update() {
         return p.alpha > 0;
     });
 
-    // Update lantern particles
-    for (let i = lanternParticles.length - 1; i >= 0; i--) {
-        const p = lanternParticles[i];
+    // Update hit particles
+    for (let i = hitParticles.length - 1; i >= 0; i--) {
+        const p = hitParticles[i];
         p.x += p.vx * dt;
         p.y += p.vy * dt;
-        p.vy += 0.1 * dt;
-        p.alpha -= 0.02 * dt;
-        if (p.alpha <= 0) lanternParticles.splice(i, 1);
-    }
-
-    // Update fireflies
-    for (let i = 0; i < fireflies.length; i++) {
-        const f = fireflies[i];
-        f.phase += 0.02 * dt;
-        f.drift += 0.01 * dt;
-        f.x += Math.sin(f.drift) * f.speed * dt;
-        f.y += Math.cos(f.drift * 0.7) * f.speed * 0.5 * dt;
-        // Wrap around
-        if (f.x < -20) f.x = canvas.width + 20;
-        if (f.x > canvas.width + 20) f.x = -20;
-    }
-
-    // Occasional shooting star
-    if (Math.random() < 0.002 * dt && shootingStars.length < 2) {
-        shootingStars.push({
-            x: Math.random() * canvas.width,
-            y: 20 + Math.random() * 80,
-            vx: 8 + Math.random() * 6,
-            vy: 2 + Math.random() * 2,
-            alpha: 1,
-            length: 40 + Math.random() * 30
-        });
-    }
-
-    // Update shooting stars
-    for (let i = shootingStars.length - 1; i >= 0; i--) {
-        const s = shootingStars[i];
-        s.x += s.vx * dt;
-        s.y += s.vy * dt;
-        s.alpha -= 0.015 * dt;
-        if (s.alpha <= 0 || s.x > canvas.width + 50) shootingStars.splice(i, 1);
+        p.vy += 0.15 * dt;
+        p.alpha -= 0.03 * dt;
+        if (p.alpha <= 0) hitParticles.splice(i, 1);
     }
 }
 
@@ -411,10 +289,10 @@ function checkTargetCollisions() {
     const bladeTipX = armEndX + Math.cos(robot.armAngle + robot.bladeAngle) * bladeLength;
     const bladeTipY = armEndY + Math.sin(robot.armAngle + robot.bladeAngle) * bladeLength;
 
-    targets.forEach(target => {
-        if (!target.alive) return;
+    for (let i = 0; i < targets.length; i++) {
+        const target = targets[i];
+        if (!target.alive) continue;
 
-        // Check line-circle collision
         const dx = bladeTipX - armEndX;
         const dy = bladeTipY - armEndY;
         const fx = armEndX - target.x;
@@ -432,25 +310,22 @@ function checkTargetCollisions() {
 
             if ((t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1)) {
                 target.alive = false;
-                robot.screenShake.x = (Math.random() - 0.5) * 8;
-                robot.screenShake.y = (Math.random() - 0.5) * 8;
+                robot.screenShake.x = (Math.random() - 0.5) * 6;
+                robot.screenShake.y = (Math.random() - 0.5) * 6;
 
-                // Spawn lantern destruction particles
-                for (let p = 0; p < 8; p++) {
-                    const angle = (p / 8) * Math.PI * 2 + Math.random() * 0.5;
-                    const speed = 2 + Math.random() * 3;
-                    lanternParticles.push({
+                // Minimal hit particles - just a few white dots
+                for (let p = 0; p < 4; p++) {
+                    const angle = (p / 4) * Math.PI * 2 + Math.random() * 0.5;
+                    const speed = 1.5 + Math.random() * 2;
+                    hitParticles.push({
                         x: target.x,
                         y: target.y,
                         vx: Math.cos(angle) * speed,
-                        vy: Math.sin(angle) * speed - 2,
-                        size: 3 + Math.random() * 4,
-                        alpha: 1,
-                        hue: target.hue
+                        vy: Math.sin(angle) * speed - 1.5,
+                        alpha: 1
                     });
                 }
 
-                // Combo system
                 if (robot.isJumping) {
                     robot.combo++;
                     if (robot.combo > robot.bestCombo) {
@@ -459,7 +334,7 @@ function checkTargetCollisions() {
                 }
             }
         }
-    });
+    }
 }
 
 function updateAttack() {
@@ -481,7 +356,6 @@ function updateAttack() {
 
         const p = robot.attackProgress;
 
-        // Set arm angle: 0=right, -PI=left, -PI/2=up, PI/2=down
         if (direction === 'up') robot.armAngle = -Math.PI / 2;
         else if (direction === 'down') robot.armAngle = Math.PI / 2;
         else if (direction === 'left') robot.armAngle = -Math.PI;
@@ -531,7 +405,6 @@ function updateAttack() {
             robot.armExtension = 1;
             robot.bladeExtension = 1.3;
 
-            // Different swing arcs
             if (swingType === 'lr') {
                 robot.armAngle = -Math.PI - 0.2 + easeInOut(p) * (Math.PI + 0.4);
             } else if (swingType === 'rl') {
@@ -541,21 +414,19 @@ function updateAttack() {
             } else if (swingType === 'du') {
                 robot.armAngle = Math.PI / 2 + 0.2 - easeInOut(p) * (Math.PI + 0.4);
             } else {
-                // Diagonal swing
                 robot.armAngle = -Math.PI * 0.75 + easeInOut(p) * Math.PI * 1.5;
             }
 
             robot.bladeAngle = Math.sin(p * Math.PI) * 0.15;
 
             if (p > 0.3 && p < 0.7) {
-                robot.screenShake.x = (Math.random() - 0.5) * 5;
-                robot.screenShake.y = (Math.random() - 0.5) * 3;
+                robot.screenShake.x = (Math.random() - 0.5) * 4;
+                robot.screenShake.y = (Math.random() - 0.5) * 2;
             }
         }
         addTrailPoint();
 
     } else {
-        // Idle
         robot.armAngle += (-Math.PI/2 - robot.armAngle) * 0.15;
         robot.bladeAngle *= 0.8;
         robot.bladeExtension *= 0.85;
@@ -582,301 +453,199 @@ function addTrailPoint() {
     }
 }
 
-// Cache static background once at startup
+// Cache static background
 function initBackground() {
-    // Create cached lantern glow (white, will be tinted when drawn)
-    const glowGrad = glowCtx.createRadialGradient(40, 40, 0, 40, 40, 40);
-    glowGrad.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
-    glowGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.15)');
-    glowGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    glowCtx.fillStyle = glowGrad;
-    glowCtx.fillRect(0, 0, 80, 80);
-
-    // Night sky gradient
-    const skyGrad = bgCtx.createLinearGradient(0, 0, 0, GROUND_Y);
-    skyGrad.addColorStop(0, '#0a0a18');
-    skyGrad.addColorStop(0.5, '#101025');
-    skyGrad.addColorStop(1, '#181830');
-    bgCtx.fillStyle = skyGrad;
+    // Solid dark background
+    bgCtx.fillStyle = COLORS.bg;
     bgCtx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Moon
-    bgCtx.fillStyle = '#e8e8d0';
+    // Moon outline
+    bgCtx.strokeStyle = COLORS.dim;
+    bgCtx.lineWidth = 1;
     bgCtx.beginPath();
-    bgCtx.arc(750, 80, 35, 0, Math.PI * 2);
-    bgCtx.fill();
-    // Moon glow
-    const moonGlow = bgCtx.createRadialGradient(750, 80, 35, 750, 80, 120);
-    moonGlow.addColorStop(0, 'rgba(200, 200, 180, 0.15)');
-    moonGlow.addColorStop(1, 'rgba(200, 200, 180, 0)');
-    bgCtx.fillStyle = moonGlow;
-    bgCtx.fillRect(600, 0, 300, 250);
+    bgCtx.arc(780, 70, 30, 0, Math.PI * 2);
+    bgCtx.stroke();
 
-    // Stars (sparse)
-    bgCtx.fillStyle = '#ffffff';
-    const stars = [[120, 45, 0.5], [280, 70, 0.6], [450, 35, 0.4], [600, 90, 0.55], [180, 120, 0.45], [520, 60, 0.5], [850, 50, 0.6], [80, 80, 0.5], [320, 30, 0.45], [720, 65, 0.5]];
-    for (let i = 0; i < stars.length; i++) {
-        bgCtx.globalAlpha = stars[i][2];
-        bgCtx.fillRect(stars[i][0], stars[i][1], 2, 2);
-    }
-    bgCtx.globalAlpha = 1;
-
-    // Distant mountains
-    bgCtx.fillStyle = '#1a1a2e';
+    // Distant mountains - wireframe outline
+    bgCtx.strokeStyle = COLORS.line;
+    bgCtx.lineWidth = 1;
     bgCtx.beginPath();
-    bgCtx.moveTo(0, GROUND_Y - 80);
-    bgCtx.lineTo(100, GROUND_Y - 180);
-    bgCtx.lineTo(200, GROUND_Y - 120);
-    bgCtx.lineTo(350, GROUND_Y - 220);
-    bgCtx.lineTo(500, GROUND_Y - 140);
-    bgCtx.lineTo(650, GROUND_Y - 200);
-    bgCtx.lineTo(800, GROUND_Y - 100);
-    bgCtx.lineTo(900, GROUND_Y - 160);
-    bgCtx.lineTo(900, GROUND_Y);
-    bgCtx.lineTo(0, GROUND_Y);
-    bgCtx.closePath();
-    bgCtx.fill();
+    bgCtx.moveTo(0, GROUND_Y - 60);
+    bgCtx.lineTo(120, GROUND_Y - 160);
+    bgCtx.lineTo(240, GROUND_Y - 80);
+    bgCtx.lineTo(360, GROUND_Y - 200);
+    bgCtx.lineTo(480, GROUND_Y - 100);
+    bgCtx.lineTo(600, GROUND_Y - 180);
+    bgCtx.lineTo(720, GROUND_Y - 90);
+    bgCtx.lineTo(840, GROUND_Y - 150);
+    bgCtx.lineTo(900, GROUND_Y - 70);
+    bgCtx.stroke();
 
-    // Mid mountains
-    bgCtx.fillStyle = '#12121f';
+    // Closer mountain range - slightly brighter
+    bgCtx.strokeStyle = COLORS.dim;
     bgCtx.beginPath();
-    bgCtx.moveTo(0, GROUND_Y - 40);
-    bgCtx.lineTo(150, GROUND_Y - 130);
-    bgCtx.lineTo(280, GROUND_Y - 70);
-    bgCtx.lineTo(420, GROUND_Y - 150);
-    bgCtx.lineTo(580, GROUND_Y - 90);
-    bgCtx.lineTo(720, GROUND_Y - 120);
-    bgCtx.lineTo(900, GROUND_Y - 60);
-    bgCtx.lineTo(900, GROUND_Y);
-    bgCtx.lineTo(0, GROUND_Y);
-    bgCtx.closePath();
-    bgCtx.fill();
-
-    // Ground fill
-    bgCtx.fillStyle = '#0a0a15';
-    bgCtx.fillRect(0, GROUND_Y, canvas.width, canvas.height - GROUND_Y);
-}
-
-function drawMoonlitBackground() {
-    ctx.drawImage(bgCanvas, 0, 0);
-}
-
-function drawShootingStars() {
-    for (let i = 0; i < shootingStars.length; i++) {
-        const s = shootingStars[i];
-        ctx.strokeStyle = `rgba(255, 255, 255, ${s.alpha})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(s.x | 0, s.y | 0);
-        ctx.lineTo((s.x - s.vx * 4) | 0, (s.y - s.vy * 4) | 0);
-        ctx.stroke();
-    }
-}
-
-function drawFireflies() {
-    for (let i = 0; i < fireflies.length; i++) {
-        const f = fireflies[i];
-        const brightness = 0.3 + Math.sin(f.phase) * 0.3;
-        ctx.fillStyle = `rgba(200, 255, 150, ${brightness})`;
-        ctx.beginPath();
-        ctx.arc(f.x | 0, f.y | 0, 2, 0, Math.PI * 2);
-        ctx.fill();
-    }
-}
-
-function drawLanternParticles() {
-    for (let i = 0; i < lanternParticles.length; i++) {
-        const p = lanternParticles[i];
-        ctx.globalAlpha = p.alpha;
-        ctx.fillStyle = `rgb(${p.hue[0]}, ${p.hue[1]}, ${p.hue[2]})`;
-        ctx.fillRect((p.x - p.size / 2) | 0, (p.y - p.size / 2) | 0, p.size | 0, p.size | 0);
-    }
-    ctx.globalAlpha = 1;
-}
-
-// Draw background tree shadows with parallax scrolling (optimized)
-function drawTreeShadows() {
-    ctx.fillStyle = '#080814';
-    const baseY = GROUND_Y + 10;
-
-    for (let i = 0; i < treeShadows.length; i++) {
-        const tree = treeShadows[i];
-        let screenX = tree.worldX - (worldScroll * 1.2);
-        screenX = ((screenX % 2500) + 2500) % 2500 - 400;
-
-        if (screenX < -100 || screenX > 1000) continue;
-
-        const lean = tree.height * tree.lean;
-        const w = tree.width;
-        const h = tree.height;
-
-        // Simple triangle tree - all types reduced to triangles
-        ctx.beginPath();
-        ctx.moveTo(screenX + lean, baseY - h);
-        ctx.lineTo(screenX - w, baseY);
-        ctx.lineTo(screenX + w, baseY);
-        ctx.fill();
-    }
+    bgCtx.moveTo(0, GROUND_Y - 30);
+    bgCtx.lineTo(80, GROUND_Y - 100);
+    bgCtx.lineTo(180, GROUND_Y - 50);
+    bgCtx.lineTo(300, GROUND_Y - 130);
+    bgCtx.lineTo(420, GROUND_Y - 70);
+    bgCtx.lineTo(540, GROUND_Y - 110);
+    bgCtx.lineTo(660, GROUND_Y - 60);
+    bgCtx.lineTo(780, GROUND_Y - 95);
+    bgCtx.lineTo(900, GROUND_Y - 45);
+    bgCtx.stroke();
 }
 
 function draw() {
     ctx.save();
     ctx.translate(robot.screenShake.x | 0, robot.screenShake.y | 0);
 
-    drawMoonlitBackground();
-    drawShootingStars();
-    drawFireflies();
+    // Draw cached background
+    ctx.drawImage(bgCanvas, 0, 0);
 
-    // Combo warm tint overlay
-    if (robot.combo > 2 && robot.isJumping) {
-        const intensity = Math.min(robot.combo * 0.03, 0.15);
-        ctx.fillStyle = `rgba(255, 150, 50, ${intensity})`;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
+    // Silhouettes (foreground trees)
+    drawSilhouettes();
 
-    // Slowmo visual effect - blue tint overlay
-    if (slowmo) {
-        ctx.fillStyle = 'rgba(100, 150, 255, 0.1)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-
-    drawTreeShadows();
+    // Ground with grid
     drawGround();
+
+    // Targets
     drawTargets();
-    drawLanternParticles();
-    drawSpeedLines();
-    drawDustParticles();
+
+    // Hit particles
+    drawHitParticles();
+
+    // Afterimages
     drawAfterimages();
+
+    // Strike trail
     drawStrikeTrail();
+
+    // Robot
     drawRobot(robot.x | 0, robot.y | 0, 1, robot.armAngle, robot.bladeAngle, robot.wheelRotation, robot.bladeExtension, false, robot.armExtension);
 
-    // Slowmo radial lines effect
+    // Slowmo indicator - thin radial lines
     if (slowmo) {
-        ctx.strokeStyle = 'rgba(150, 180, 255, 0.3)';
+        ctx.strokeStyle = COLORS.line;
         ctx.lineWidth = 1;
         const rx = robot.x | 0;
         const ry = (robot.y - 10) | 0;
-        for (let i = 0; i < 12; i++) {
-            const angle = (i / 12) * Math.PI * 2;
-            const cos = Math.cos(angle);
-            const sin = Math.sin(angle);
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
             ctx.beginPath();
-            ctx.moveTo(rx + cos * 40, ry + sin * 40);
-            ctx.lineTo(rx + cos * 200, ry + sin * 200);
+            ctx.moveTo(rx + Math.cos(angle) * 30, ry + Math.sin(angle) * 30);
+            ctx.lineTo(rx + Math.cos(angle) * 150, ry + Math.sin(angle) * 150);
             ctx.stroke();
         }
     }
 
-    // Combo display with scaling effect
+    // Combo display - minimal
     if (robot.combo > 1 && robot.isJumping) {
-        const scale = 1 + Math.min(robot.combo * 0.1, 0.5);
-        const shake = robot.combo > 3 ? (Math.random() - 0.5) * robot.combo : 0;
-        ctx.save();
-        ctx.translate(canvas.width / 2 + shake, 80);
-        ctx.scale(scale, scale);
-        ctx.fillStyle = '#ffdd44';
-        ctx.font = 'bold 28px monospace';
+        ctx.fillStyle = COLORS.bright;
+        ctx.font = '24px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(`${robot.combo}x COMBO!`, 0, 0);
+        ctx.fillText(`${robot.combo}x`, canvas.width / 2, 70);
         ctx.restore();
     } else if (robot.comboTimer > 0 && robot.combo > 1) {
         ctx.globalAlpha = robot.comboTimer / 120;
-        ctx.fillStyle = '#ffdd44';
-        ctx.font = 'bold 28px monospace';
+        ctx.fillStyle = COLORS.bright;
+        ctx.font = '24px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(`${robot.combo}x COMBO!`, canvas.width / 2, 80);
+        ctx.fillText(`${robot.combo}x`, canvas.width / 2, 70);
         ctx.textAlign = 'left';
         ctx.globalAlpha = 1;
     }
 
     drawUI();
-
     ctx.restore();
+}
+
+function drawSilhouettes() {
+    ctx.strokeStyle = COLORS.dim;
+    ctx.lineWidth = 1;
+    const baseY = GROUND_Y + 10;
+
+    for (let i = 0; i < silhouettes.length; i++) {
+        const s = silhouettes[i];
+        let screenX = s.worldX - (worldScroll * 1.2);
+        screenX = ((screenX % 2500) + 2500) % 2500 - 400;
+
+        if (screenX < -100 || screenX > 1000) continue;
+
+        // Wireframe triangle
+        ctx.beginPath();
+        ctx.moveTo(screenX | 0, (baseY - s.height) | 0);
+        ctx.lineTo((screenX - s.width) | 0, baseY);
+        ctx.lineTo((screenX + s.width) | 0, baseY);
+        ctx.closePath();
+        ctx.stroke();
+    }
 }
 
 let groundScrollPos = 0;
 
 function drawGround() {
-    // Ground line
-    ctx.strokeStyle = '#c8c8e0';
-    ctx.lineWidth = 2;
+    // Main ground line
+    ctx.strokeStyle = COLORS.bright;
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, GROUND_Y + 10);
     ctx.lineTo(canvas.width, GROUND_Y + 10);
     ctx.stroke();
 
-    // Scrolling markers
-    ctx.strokeStyle = '#5a5a80';
-    groundScrollPos = ((groundScrollPos - robot.velocityX * 0.5) % 30 + 30) % 30;
+    // Grid markers
+    ctx.strokeStyle = COLORS.line;
+    groundScrollPos = ((groundScrollPos - robot.velocityX * 0.5) % 40 + 40) % 40;
 
-    for (let x = groundScrollPos | 0; x < canvas.width; x += 30) {
+    for (let x = groundScrollPos | 0; x < canvas.width; x += 40) {
+        // Vertical tick
         ctx.beginPath();
-        ctx.moveTo(x, GROUND_Y + 14);
-        ctx.lineTo(x, GROUND_Y + 20);
+        ctx.moveTo(x, GROUND_Y + 10);
+        ctx.lineTo(x, GROUND_Y + 18);
         ctx.stroke();
     }
+
+    // Subtle perspective grid lines extending up
+    ctx.globalAlpha = 0.15;
+    for (let x = groundScrollPos | 0; x < canvas.width; x += 80) {
+        ctx.beginPath();
+        ctx.moveTo(x, GROUND_Y + 10);
+        ctx.lineTo(canvas.width / 2, 50);
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
 }
 
 function drawTargets() {
+    ctx.strokeStyle = COLORS.bright;
+    ctx.lineWidth = 1;
+
     for (let i = 0; i < targets.length; i++) {
         const t = targets[i];
         if (!t.alive || t.x < -50 || t.x > 950) continue;
 
         const x = t.x | 0;
         const y = t.y | 0;
-        const size = t.radius;
-        const h = t.hue;
 
-        // Glow using cached texture with color tint
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = 0.6;
-        ctx.drawImage(glowCanvas, x - 40, y - 40);
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = 1;
-
-        // Lantern body with color
-        ctx.fillStyle = `rgb(${h[0]}, ${h[1]}, ${h[2]})`;
+        // Simple circle outline
         ctx.beginPath();
-        ctx.ellipse(x, y, size * 0.7, size, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Inner glow (brighter)
-        ctx.fillStyle = `rgba(${Math.min(255, h[0] + 40)}, ${Math.min(255, h[1] + 40)}, ${Math.min(255, h[2] + 40)}, 0.9)`;
-        ctx.beginPath();
-        ctx.ellipse(x, y, size * 0.4, size * 0.6, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        // String
-        ctx.strokeStyle = '#443322';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x, y - size);
-        ctx.lineTo(x, (y - size - 15) | 0);
+        ctx.arc(x, y, t.radius, 0, Math.PI * 2);
         ctx.stroke();
+
+        // Small center dot
+        ctx.fillStyle = COLORS.bright;
+        ctx.beginPath();
+        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+        ctx.fill();
     }
 }
 
-function drawSpeedLines() {
-    ctx.strokeStyle = '#9999cc';
-    ctx.lineWidth = 1;
-    const dir = robot.velocityX > 0 ? -1 : 1;
-    for (let i = 0; i < robot.speedLines.length; i++) {
-        const line = robot.speedLines[i];
-        ctx.globalAlpha = line.alpha;
-        ctx.beginPath();
-        ctx.moveTo(line.x | 0, line.y | 0);
-        ctx.lineTo((line.x + line.length * dir) | 0, line.y | 0);
-        ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-}
-
-function drawDustParticles() {
-    ctx.fillStyle = '#9999aa';
-    for (let i = 0; i < robot.dustParticles.length; i++) {
-        const p = robot.dustParticles[i];
+function drawHitParticles() {
+    ctx.fillStyle = COLORS.bright;
+    for (let i = 0; i < hitParticles.length; i++) {
+        const p = hitParticles[i];
         ctx.globalAlpha = p.alpha;
-        ctx.fillRect(p.x | 0, p.y | 0, p.size | 0, p.size | 0);
+        ctx.fillRect((p.x - 1) | 0, (p.y - 1) | 0, 2, 2);
     }
     ctx.globalAlpha = 1;
 }
@@ -884,14 +653,14 @@ function drawDustParticles() {
 function drawAfterimages() {
     for (let i = 0; i < robot.afterimages.length; i++) {
         const img = robot.afterimages[i];
-        drawRobot(img.x | 0, img.y | 0, img.alpha * 0.3, img.armAngle, 0, img.wheelRotation, img.bladeExtension, true, img.armExtension);
+        drawRobot(img.x | 0, img.y | 0, img.alpha * 0.5, img.armAngle, 0, img.wheelRotation, img.bladeExtension, true, img.armExtension);
     }
 }
 
 function drawStrikeTrail() {
     if (robot.strikeTrail.length < 2) return;
 
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1;
     for (let i = 1; i < robot.strikeTrail.length; i++) {
         const p1 = robot.strikeTrail[i - 1];
         const p2 = robot.strikeTrail[i];
@@ -910,9 +679,10 @@ function drawRobot(x, y, alpha = 1, armAng = -Math.PI/2, bladeAng = 0, wheelRot 
     const wheelRadius = 10;
     const wheelY = y + 1;
 
+    ctx.strokeStyle = isAfterimage ? COLORS.dim : COLORS.bright;
+    ctx.lineWidth = isAfterimage ? 1 : 1.5;
+
     // Wheel
-    ctx.strokeStyle = isAfterimage ? '#4a4a6a' : '#e8e8ff';
-    ctx.lineWidth = isAfterimage ? 1 : 2;
     ctx.beginPath();
     ctx.arc(x, wheelY, wheelRadius, 0, Math.PI * 2);
     ctx.stroke();
@@ -932,10 +702,9 @@ function drawRobot(x, y, alpha = 1, armAng = -Math.PI/2, bladeAng = 0, wheelRot 
         const armEndX = pivotX + Math.cos(armAng) * armLength;
         const armEndY = pivotY + Math.sin(armAng) * armLength;
 
-        ctx.lineWidth = isAfterimage ? 1 : 2;
         ctx.beginPath();
         ctx.moveTo(pivotX, pivotY);
-        ctx.lineTo(armEndX, armEndY);
+        ctx.lineTo(armEndX | 0, armEndY | 0);
         ctx.stroke();
 
         // Blade
@@ -945,11 +714,9 @@ function drawRobot(x, y, alpha = 1, armAng = -Math.PI/2, bladeAng = 0, wheelRot 
             const bladeTipX = armEndX + Math.cos(totalBladeAngle) * bladeLength;
             const bladeTipY = armEndY + Math.sin(totalBladeAngle) * bladeLength;
 
-            ctx.strokeStyle = isAfterimage ? '#5a5a7a' : '#ffffff';
-            ctx.lineWidth = isAfterimage ? 1 : 2;
             ctx.beginPath();
-            ctx.moveTo(armEndX, armEndY);
-            ctx.lineTo(bladeTipX, bladeTipY);
+            ctx.moveTo(armEndX | 0, armEndY | 0);
+            ctx.lineTo(bladeTipX | 0, bladeTipY | 0);
             ctx.stroke();
         }
     }
@@ -958,36 +725,19 @@ function drawRobot(x, y, alpha = 1, armAng = -Math.PI/2, bladeAng = 0, wheelRot 
 }
 
 function drawUI() {
-    ctx.fillStyle = '#7070a0';
-    ctx.font = 'bold 13px monospace';
+    ctx.fillStyle = COLORS.line;
+    ctx.font = '11px monospace';
 
-    // Target count
     const alive = targets.filter(t => t.alive).length;
-    ctx.fillText(`targets: ${alive}/${targets.length}`, 20, 25);
+    ctx.fillText(`${alive}/${targets.length}`, 20, 22);
 
-    // Best combo
     if (robot.bestCombo > 1) {
-        ctx.fillText(`best combo: ${robot.bestCombo}x`, 20, 42);
+        ctx.fillText(`best: ${robot.bestCombo}x`, 20, 36);
     }
 
-    // Slowmo indicator
     if (slowmo) {
-        ctx.fillStyle = '#6699ff';
-        ctx.fillText('[SLOWMO]', canvas.width - 100, 25);
-    }
-
-    if (robot.attackState !== 'idle') {
-        ctx.fillStyle = '#c0c0e0';
-        let mode = '';
-        switch(robot.attackState) {
-            case 'jab-left': mode = robot.attackHeld ? '[JAB_L_HOLD]' : '[JAB_L]'; break;
-            case 'jab-right': mode = robot.attackHeld ? '[JAB_R_HOLD]' : '[JAB_R]'; break;
-            case 'jab-up': mode = robot.attackHeld ? '[JAB_UP_HOLD]' : '[JAB_UP]'; break;
-            case 'swing-lr': mode = '[SWING_LR]'; break;
-            case 'swing-rl': mode = '[SWING_RL]'; break;
-            case 'swing-up': mode = '[SWING_UP]'; break;
-        }
-        ctx.fillText(mode, canvas.width - 100, 42);
+        ctx.fillStyle = COLORS.bright;
+        ctx.fillText('SLOW', canvas.width - 50, 22);
     }
 }
 
