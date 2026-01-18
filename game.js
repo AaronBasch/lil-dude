@@ -5,11 +5,39 @@ const ctx = canvas.getContext('2d');
 canvas.width = 900;
 canvas.height = 500;
 
+// Offscreen canvas for static background (cached)
+const bgCanvas = document.createElement('canvas');
+bgCanvas.width = canvas.width;
+bgCanvas.height = canvas.height;
+const bgCtx = bgCanvas.getContext('2d');
+
 const keys = {};
 const GROUND_Y = canvas.height - 60;
 
-// Scale factor for character
-const SCALE = 0.5;
+// World scrolling for parallax effect
+let worldScroll = 0;
+const SCROLL_SPEED = 0.8;
+
+// Slowmo system
+let slowmo = false;
+let slowmoFactor = 1;
+
+// Foreground tree shadows - positioned in world space with varied shapes
+// type: 0=pointed pine, 1=round oak, 2=thin birch, 3=bushy spruce
+const treeShadows = [
+    { worldX: -100, height: 320, width: 75, type: 3, lean: 0.05 },
+    { worldX: 150, height: 180, width: 35, type: 2, lean: -0.08 },
+    { worldX: 380, height: 260, width: 55, type: 0, lean: 0.02 },
+    { worldX: 520, height: 140, width: 50, type: 1, lean: 0 },
+    { worldX: 750, height: 290, width: 65, type: 3, lean: -0.03 },
+    { worldX: 950, height: 200, width: 40, type: 2, lean: 0.1 },
+    { worldX: 1150, height: 350, width: 80, type: 0, lean: -0.02 },
+    { worldX: 1350, height: 170, width: 60, type: 1, lean: 0.05 },
+    { worldX: 1550, height: 240, width: 45, type: 2, lean: -0.06 },
+    { worldX: 1780, height: 310, width: 70, type: 3, lean: 0.03 },
+    { worldX: 1950, height: 190, width: 55, type: 1, lean: -0.04 },
+    { worldX: 2150, height: 280, width: 50, type: 0, lean: 0.07 },
+];
 
 // Robot character
 const robot = {
@@ -19,10 +47,15 @@ const robot = {
     velocityY: 0,
     isJumping: false,
 
-    speed: 14,
-    jumpForce: -12,
-    gravity: 0.5,
+    speed: 30,
+    jumpForce: -18,
+    gravity: 0.6,
     friction: 0.85,
+
+    // Combo system
+    combo: 0,
+    comboTimer: 0,
+    bestCombo: 0,
 
     armAngle: -Math.PI / 2,
     bladeAngle: 0,
@@ -41,13 +74,31 @@ const robot = {
     screenShake: { x: 0, y: 0 }
 };
 
-// Targets
+// Targets - paper lanterns that bob up and down
+let bobTime = 0;
 const targets = [
-    { x: 400, y: GROUND_Y - 30 * SCALE, radius: 15, alive: true },
-    { x: 550, y: GROUND_Y - 60 * SCALE, radius: 15, alive: true },
-    { x: 650, y: GROUND_Y - 20 * SCALE, radius: 12, alive: true },
-    { x: 300, y: GROUND_Y - 80 * SCALE, radius: 18, alive: true },
-    { x: 750, y: GROUND_Y - 40 * SCALE, radius: 14, alive: true },
+    // Ground level
+    { worldX: 400, x: 400, baseY: GROUND_Y - 25, y: 0, radius: 14, alive: true, phase: 0 },
+    { worldX: 900, x: 900, baseY: GROUND_Y - 20, y: 0, radius: 12, alive: true, phase: 1.2 },
+    { worldX: 1500, x: 1500, baseY: GROUND_Y - 25, y: 0, radius: 13, alive: true, phase: 2.5 },
+    { worldX: 2100, x: 2100, baseY: GROUND_Y - 22, y: 0, radius: 12, alive: true, phase: 0.8 },
+    // Low air
+    { worldX: 300, x: 300, baseY: GROUND_Y - 70, y: 0, radius: 12, alive: true, phase: 1.8 },
+    { worldX: 600, x: 600, baseY: GROUND_Y - 90, y: 0, radius: 13, alive: true, phase: 3.1 },
+    { worldX: 1000, x: 1000, baseY: GROUND_Y - 80, y: 0, radius: 12, alive: true, phase: 0.5 },
+    { worldX: 1400, x: 1400, baseY: GROUND_Y - 75, y: 0, radius: 14, alive: true, phase: 2.2 },
+    { worldX: 1800, x: 1800, baseY: GROUND_Y - 85, y: 0, radius: 12, alive: true, phase: 4.0 },
+    // Mid air
+    { worldX: 450, x: 450, baseY: GROUND_Y - 130, y: 0, radius: 11, alive: true, phase: 1.5 },
+    { worldX: 750, x: 750, baseY: GROUND_Y - 150, y: 0, radius: 12, alive: true, phase: 2.8 },
+    { worldX: 1100, x: 1100, baseY: GROUND_Y - 140, y: 0, radius: 13, alive: true, phase: 0.3 },
+    { worldX: 1600, x: 1600, baseY: GROUND_Y - 135, y: 0, radius: 11, alive: true, phase: 3.5 },
+    { worldX: 1950, x: 1950, baseY: GROUND_Y - 145, y: 0, radius: 12, alive: true, phase: 1.1 },
+    // High air
+    { worldX: 550, x: 550, baseY: GROUND_Y - 190, y: 0, radius: 10, alive: true, phase: 2.0 },
+    { worldX: 850, x: 850, baseY: GROUND_Y - 210, y: 0, radius: 11, alive: true, phase: 3.8 },
+    { worldX: 1250, x: 1250, baseY: GROUND_Y - 200, y: 0, radius: 10, alive: true, phase: 0.9 },
+    { worldX: 1700, x: 1700, baseY: GROUND_Y - 195, y: 0, radius: 11, alive: true, phase: 2.6 },
 ];
 
 // Input handling
@@ -131,6 +182,12 @@ function handleAttackRelease(direction) {
 }
 
 function update() {
+    // Slowmo when holding space (while in air)
+    slowmo = keys[' '] && robot.isJumping;
+    slowmoFactor = slowmo ? 0.25 : 1;
+
+    const dt = slowmoFactor;
+
     // Movement with arrow keys
     if (keys['ArrowLeft']) {
         robot.velocityX = -robot.speed;
@@ -140,24 +197,51 @@ function update() {
         robot.velocityX *= robot.friction;
     }
 
-    // Jump with arrow up or space
-    if ((keys['ArrowUp'] || keys[' ']) && !robot.isJumping) {
+    // Jump with arrow up
+    if (keys['ArrowUp'] && !robot.isJumping) {
         robot.velocityY = robot.jumpForce;
         robot.isJumping = true;
+        robot.combo = 0; // Reset combo on new jump
     }
 
-    robot.velocityY += robot.gravity;
-    robot.x += robot.velocityX;
-    robot.y += robot.velocityY;
+    robot.velocityY += robot.gravity * dt;
+    robot.y += robot.velocityY * dt;
+
+    // Combo timer decay
+    if (robot.comboTimer > 0) {
+        robot.comboTimer -= dt;
+    }
 
     if (robot.y >= GROUND_Y) {
         robot.y = GROUND_Y;
         robot.velocityY = 0;
+        if (robot.isJumping && robot.combo > 1) {
+            robot.comboTimer = 120; // Show combo for 2 seconds
+        }
         robot.isJumping = false;
     }
 
-    if (robot.x < 30) robot.x = 30;
-    if (robot.x > canvas.width - 30) robot.x = canvas.width - 30;
+    // Move robot on screen, scroll world only at edges
+    const LEFT_EDGE = 150;
+    const RIGHT_EDGE = canvas.width - 150;
+
+    robot.x += robot.velocityX * dt;
+
+    // Scroll world when robot hits edge zones
+    if (robot.x < LEFT_EDGE) {
+        worldScroll += robot.x - LEFT_EDGE;
+        robot.x = LEFT_EDGE;
+    } else if (robot.x > RIGHT_EDGE) {
+        worldScroll += robot.x - RIGHT_EDGE;
+        robot.x = RIGHT_EDGE;
+    }
+
+    // Update target screen positions and bobbing
+    bobTime += 0.03 * dt;
+    for (let i = 0; i < targets.length; i++) {
+        targets[i].x = targets[i].worldX - worldScroll;
+        targets[i].y = targets[i].baseY + Math.sin(bobTime + targets[i].phase) * 8;
+    }
 
     robot.wheelRotation += robot.velocityX * 0.15;
     updateAttack();
@@ -166,15 +250,15 @@ function update() {
     robot.screenShake.x *= 0.8;
     robot.screenShake.y *= 0.8;
 
-    // Enhanced speed effects
+    // Speed effects (reduced frequency)
     const absVel = Math.abs(robot.velocityX);
-    if (absVel > 0.5) {
-        // More afterimages
-        if (Math.random() > 0.2) {
+    if (absVel > 2) {
+        // Afterimages - less frequent
+        if (Math.random() > 0.5) {
             robot.afterimages.push({
                 x: robot.x,
                 y: robot.y,
-                alpha: 0.8,
+                alpha: 0.6,
                 wheelRotation: robot.wheelRotation,
                 armAngle: robot.armAngle,
                 armExtension: robot.armExtension,
@@ -182,28 +266,28 @@ function update() {
             });
         }
 
-        // More speed lines - bigger and more frequent
-        if (Math.random() > 0.1) {
+        // Speed lines - reduced
+        if (Math.random() > 0.6) {
             const direction = robot.velocityX > 0 ? -1 : 1;
             robot.speedLines.push({
-                x: robot.x + direction * 30 + Math.random() * 150 * direction,
-                y: robot.y - 15 * SCALE + (Math.random() - 0.5) * 80,
-                length: 40 + Math.random() * 80,
-                alpha: 0.9,
-                speed: absVel * 2.5
+                x: robot.x + direction * 30 + Math.random() * 100 * direction,
+                y: robot.y - 8 + (Math.random() - 0.5) * 50,
+                length: 30 + Math.random() * 50,
+                alpha: 0.7,
+                speed: absVel * 2
             });
         }
 
-        // More dust
-        if (!robot.isJumping && Math.random() > 0.3) {
+        // Dust - reduced
+        if (!robot.isJumping && Math.random() > 0.7) {
             const direction = robot.velocityX > 0 ? -1 : 1;
             robot.dustParticles.push({
-                x: robot.x + direction * 8 * SCALE,
+                x: robot.x + direction * 4,
                 y: GROUND_Y,
-                vx: direction * (3 + Math.random() * 5),
-                vy: -Math.random() * 4,
-                size: 3 + Math.random() * 5,
-                alpha: 0.7
+                vx: direction * (2 + Math.random() * 3),
+                vy: -Math.random() * 3,
+                size: 2 + Math.random() * 3,
+                alpha: 0.5
             });
         }
     }
@@ -238,11 +322,11 @@ function update() {
 function checkTargetCollisions() {
     if (robot.bladeExtension < 0.3 || robot.armExtension < 0.3) return;
 
-    const wheelRadius = 20 * SCALE;
-    const armLength = 25 * SCALE * robot.armExtension;
-    const bladeLength = 120 * SCALE * robot.bladeExtension;
+    const wheelRadius = 10;
+    const armLength = 12 * robot.armExtension;
+    const bladeLength = 60 * robot.bladeExtension;
     const pivotX = robot.x;
-    const pivotY = robot.y - wheelRadius - 5 * SCALE;
+    const pivotY = robot.y - wheelRadius - 2;
 
     const armEndX = pivotX + Math.cos(robot.armAngle) * armLength;
     const armEndY = pivotY + Math.sin(robot.armAngle) * armLength;
@@ -272,6 +356,14 @@ function checkTargetCollisions() {
                 target.alive = false;
                 robot.screenShake.x = (Math.random() - 0.5) * 8;
                 robot.screenShake.y = (Math.random() - 0.5) * 8;
+
+                // Combo system
+                if (robot.isJumping) {
+                    robot.combo++;
+                    if (robot.combo > robot.bestCombo) {
+                        robot.bestCombo = robot.combo;
+                    }
+                }
             }
         }
     });
@@ -382,11 +474,11 @@ function updateAttack() {
 
 function addTrailPoint() {
     if (robot.bladeExtension > 0.3 && robot.armExtension > 0.3) {
-        const wheelRadius = 20 * SCALE;
-        const armLength = 25 * SCALE * robot.armExtension;
-        const bladeLength = 120 * SCALE * robot.bladeExtension;
+        const wheelRadius = 10;
+        const armLength = 12 * robot.armExtension;
+        const bladeLength = 60 * robot.bladeExtension;
         const pivotX = robot.x;
-        const pivotY = robot.y - wheelRadius - 5 * SCALE;
+        const pivotY = robot.y - wheelRadius - 2;
 
         const armEndX = pivotX + Math.cos(robot.armAngle) * armLength;
         const armEndY = pivotY + Math.sin(robot.armAngle) * armLength;
@@ -397,32 +489,115 @@ function addTrailPoint() {
     }
 }
 
+// Cache static background once at startup
+function initBackground() {
+    // Night sky gradient
+    const skyGrad = bgCtx.createLinearGradient(0, 0, 0, GROUND_Y);
+    skyGrad.addColorStop(0, '#0a0a18');
+    skyGrad.addColorStop(0.5, '#101025');
+    skyGrad.addColorStop(1, '#181830');
+    bgCtx.fillStyle = skyGrad;
+    bgCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Moon
+    bgCtx.fillStyle = '#e8e8d0';
+    bgCtx.beginPath();
+    bgCtx.arc(750, 80, 35, 0, Math.PI * 2);
+    bgCtx.fill();
+    // Moon glow
+    const moonGlow = bgCtx.createRadialGradient(750, 80, 35, 750, 80, 120);
+    moonGlow.addColorStop(0, 'rgba(200, 200, 180, 0.15)');
+    moonGlow.addColorStop(1, 'rgba(200, 200, 180, 0)');
+    bgCtx.fillStyle = moonGlow;
+    bgCtx.fillRect(600, 0, 300, 250);
+
+    // Stars (sparse) - fixed alpha values
+    bgCtx.fillStyle = '#ffffff';
+    const stars = [[120, 45, 0.5], [280, 70, 0.6], [450, 35, 0.4], [600, 90, 0.55], [180, 120, 0.45], [520, 60, 0.5], [850, 50, 0.6], [80, 80, 0.5]];
+    stars.forEach(([sx, sy, a]) => {
+        bgCtx.globalAlpha = a;
+        bgCtx.fillRect(sx, sy, 2, 2);
+    });
+    bgCtx.globalAlpha = 1;
+
+    // Distant mountains (back layer)
+    bgCtx.fillStyle = '#1a1a2e';
+    bgCtx.beginPath();
+    bgCtx.moveTo(0, GROUND_Y - 80);
+    bgCtx.lineTo(100, GROUND_Y - 180);
+    bgCtx.lineTo(200, GROUND_Y - 120);
+    bgCtx.lineTo(350, GROUND_Y - 220);
+    bgCtx.lineTo(500, GROUND_Y - 140);
+    bgCtx.lineTo(650, GROUND_Y - 200);
+    bgCtx.lineTo(800, GROUND_Y - 100);
+    bgCtx.lineTo(900, GROUND_Y - 160);
+    bgCtx.lineTo(900, GROUND_Y);
+    bgCtx.lineTo(0, GROUND_Y);
+    bgCtx.closePath();
+    bgCtx.fill();
+
+    // Mid mountains
+    bgCtx.fillStyle = '#12121f';
+    bgCtx.beginPath();
+    bgCtx.moveTo(0, GROUND_Y - 40);
+    bgCtx.lineTo(150, GROUND_Y - 130);
+    bgCtx.lineTo(280, GROUND_Y - 70);
+    bgCtx.lineTo(420, GROUND_Y - 150);
+    bgCtx.lineTo(580, GROUND_Y - 90);
+    bgCtx.lineTo(720, GROUND_Y - 120);
+    bgCtx.lineTo(900, GROUND_Y - 60);
+    bgCtx.lineTo(900, GROUND_Y);
+    bgCtx.lineTo(0, GROUND_Y);
+    bgCtx.closePath();
+    bgCtx.fill();
+
+    // Ground fill
+    bgCtx.fillStyle = '#0a0a15';
+    bgCtx.fillRect(0, GROUND_Y, canvas.width, canvas.height - GROUND_Y);
+}
+
+function drawMoonlitBackground() {
+    ctx.drawImage(bgCanvas, 0, 0);
+}
+
+// Draw background tree shadows with parallax scrolling (optimized)
+function drawTreeShadows() {
+    ctx.fillStyle = '#080814';
+    const baseY = GROUND_Y + 10;
+
+    for (let i = 0; i < treeShadows.length; i++) {
+        const tree = treeShadows[i];
+        let screenX = tree.worldX - (worldScroll * 1.2);
+        screenX = ((screenX % 2500) + 2500) % 2500 - 400;
+
+        if (screenX < -100 || screenX > 1000) continue;
+
+        const lean = tree.height * tree.lean;
+        const w = tree.width;
+        const h = tree.height;
+
+        // Simple triangle tree - all types reduced to triangles
+        ctx.beginPath();
+        ctx.moveTo(screenX + lean, baseY - h);
+        ctx.lineTo(screenX - w, baseY);
+        ctx.lineTo(screenX + w, baseY);
+        ctx.fill();
+    }
+}
+
 function draw() {
     ctx.save();
     ctx.translate(robot.screenShake.x, robot.screenShake.y);
 
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(-10, -10, canvas.width + 20, canvas.height + 20);
+    drawMoonlitBackground();
 
-    // Stronger vignette when moving
-    const absVel = Math.abs(robot.velocityX);
-    if (absVel > 2) {
-        const gradient = ctx.createRadialGradient(
-            canvas.width/2, canvas.height/2, canvas.height * 0.3,
-            canvas.width/2, canvas.height/2, canvas.width * 0.55
-        );
-        gradient.addColorStop(0, 'rgba(0,0,0,0)');
-        gradient.addColorStop(1, `rgba(0,0,0,${Math.min(absVel * 0.04, 0.5)})`);
-        ctx.fillStyle = gradient;
+    // Slowmo visual effect - blue tint overlay
+    if (slowmo) {
+        ctx.fillStyle = 'rgba(100, 150, 255, 0.1)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
-    // Scanlines
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.012)';
-    for (let y = 0; y < canvas.height; y += 3) {
-        ctx.fillRect(0, y, canvas.width, 1);
-    }
-
+    drawTreeShadows();
     drawGround();
     drawTargets();
     drawSpeedLines();
@@ -430,6 +605,33 @@ function draw() {
     drawAfterimages();
     drawStrikeTrail();
     drawRobot(robot.x, robot.y, 1, robot.armAngle, robot.bladeAngle, robot.wheelRotation, robot.bladeExtension, false, robot.armExtension);
+
+    // Slowmo radial lines effect
+    if (slowmo) {
+        ctx.strokeStyle = 'rgba(150, 180, 255, 0.3)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 12; i++) {
+            const angle = (i / 12) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(robot.x + Math.cos(angle) * 40, robot.y - 10 + Math.sin(angle) * 40);
+            ctx.lineTo(robot.x + Math.cos(angle) * 200, robot.y - 10 + Math.sin(angle) * 200);
+            ctx.stroke();
+        }
+    }
+
+    // Combo display
+    if (robot.combo > 1 && robot.isJumping) {
+        ctx.fillStyle = '#ffcc00';
+        ctx.font = 'bold 32px monospace';
+        ctx.fillText(`${robot.combo}x COMBO!`, canvas.width / 2 - 80, 80);
+    } else if (robot.comboTimer > 0 && robot.combo > 1) {
+        ctx.globalAlpha = robot.comboTimer / 120;
+        ctx.fillStyle = '#ffcc00';
+        ctx.font = 'bold 32px monospace';
+        ctx.fillText(`${robot.combo}x COMBO!`, canvas.width / 2 - 80, 80);
+        ctx.globalAlpha = 1;
+    }
+
     drawUI();
 
     ctx.restore();
@@ -438,83 +640,103 @@ function draw() {
 let groundScrollPos = 0;
 
 function drawGround() {
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1;
+    // Ground line
+    ctx.strokeStyle = '#c8c8e0';
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(0, GROUND_Y + 10);
     ctx.lineTo(canvas.width, GROUND_Y + 10);
     ctx.stroke();
 
-    ctx.strokeStyle = '#666666';
-    const lineSpacing = 25;
-    groundScrollPos -= robot.velocityX * 0.5;
-    groundScrollPos = ((groundScrollPos % lineSpacing) + lineSpacing) % lineSpacing;
+    // Scrolling markers
+    ctx.strokeStyle = '#5a5a80';
+    groundScrollPos = ((groundScrollPos - robot.velocityX * 0.5) % 30 + 30) % 30;
 
-    for (let xPos = groundScrollPos; xPos < canvas.width; xPos += lineSpacing) {
+    for (let x = groundScrollPos; x < canvas.width; x += 30) {
         ctx.beginPath();
-        ctx.moveTo(xPos, GROUND_Y + 12);
-        ctx.lineTo(xPos, GROUND_Y + 18);
+        ctx.moveTo(x, GROUND_Y + 14);
+        ctx.lineTo(x, GROUND_Y + 20);
         ctx.stroke();
     }
 }
 
 function drawTargets() {
-    targets.forEach(target => {
-        if (!target.alive) return;
+    for (let i = 0; i < targets.length; i++) {
+        const t = targets[i];
+        if (!t.alive || t.x < -50 || t.x > 950) continue;
 
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
+        const size = t.radius;
+
+        // Warm glow
+        const glow = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, size * 3);
+        glow.addColorStop(0, 'rgba(255, 180, 100, 0.35)');
+        glow.addColorStop(0.5, 'rgba(255, 140, 60, 0.15)');
+        glow.addColorStop(1, 'rgba(255, 100, 40, 0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(t.x - size * 3, t.y - size * 3, size * 6, size * 6);
+
+        // Lantern body
+        ctx.fillStyle = '#ffdd99';
         ctx.beginPath();
-        ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.ellipse(t.x, t.y, size * 0.7, size, 0, 0, Math.PI * 2);
+        ctx.fill();
 
-        // X marks the spot
+        // Inner glow
+        ctx.fillStyle = 'rgba(255, 240, 200, 0.9)';
+        ctx.beginPath();
+        ctx.ellipse(t.x, t.y, size * 0.4, size * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // String
+        ctx.strokeStyle = '#664422';
         ctx.lineWidth = 1;
-        const s = target.radius * 0.5;
         ctx.beginPath();
-        ctx.moveTo(target.x - s, target.y - s);
-        ctx.lineTo(target.x + s, target.y + s);
-        ctx.moveTo(target.x + s, target.y - s);
-        ctx.lineTo(target.x - s, target.y + s);
+        ctx.moveTo(t.x, t.y - size);
+        ctx.lineTo(t.x, t.y - size - 15);
         ctx.stroke();
-    });
+    }
 }
 
 function drawSpeedLines() {
-    robot.speedLines.forEach(line => {
-        ctx.strokeStyle = `rgba(255, 255, 255, ${line.alpha * 0.7})`;
-        ctx.lineWidth = 1;
+    ctx.strokeStyle = '#9999cc';
+    ctx.lineWidth = 1;
+    const dir = robot.velocityX > 0 ? -1 : 1;
+    for (let i = 0; i < robot.speedLines.length; i++) {
+        const line = robot.speedLines[i];
+        ctx.globalAlpha = line.alpha;
         ctx.beginPath();
         ctx.moveTo(line.x, line.y);
-        ctx.lineTo(line.x + line.length * (robot.velocityX > 0 ? -1 : 1), line.y);
+        ctx.lineTo(line.x + line.length * dir, line.y);
         ctx.stroke();
-    });
+    }
+    ctx.globalAlpha = 1;
 }
 
 function drawDustParticles() {
-    robot.dustParticles.forEach(p => {
-        ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha * 0.6})`;
-        ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
-    });
+    ctx.fillStyle = '#9999aa';
+    for (let i = 0; i < robot.dustParticles.length; i++) {
+        const p = robot.dustParticles[i];
+        ctx.globalAlpha = p.alpha;
+        ctx.fillRect(p.x, p.y, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
 }
 
 function drawAfterimages() {
-    robot.afterimages.forEach(img => {
-        drawRobot(img.x, img.y, img.alpha * 0.4, img.armAngle, 0, img.wheelRotation, img.bladeExtension, true, img.armExtension);
-    });
+    for (let i = 0; i < robot.afterimages.length; i++) {
+        const img = robot.afterimages[i];
+        drawRobot(img.x, img.y, img.alpha * 0.3, img.armAngle, 0, img.wheelRotation, img.bladeExtension, true, img.armExtension);
+    }
 }
 
 function drawStrikeTrail() {
     if (robot.strikeTrail.length < 2) return;
 
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
+    ctx.lineWidth = 2;
     for (let i = 1; i < robot.strikeTrail.length; i++) {
         const p1 = robot.strikeTrail[i - 1];
         const p2 = robot.strikeTrail[i];
-        ctx.strokeStyle = `rgba(255, 255, 255, ${p2.alpha * 0.8})`;
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${p2.alpha})`;
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
@@ -523,53 +745,35 @@ function drawStrikeTrail() {
 }
 
 function drawRobot(x, y, alpha = 1, armAng = -Math.PI/2, bladeAng = 0, wheelRot = 0, bladeExt = 0, isAfterimage = false, armExt = null) {
-    ctx.save();
     ctx.globalAlpha = alpha;
 
     const armExtension = armExt !== null ? armExt : robot.armExtension;
-    const wheelRadius = 20 * SCALE;
-    const wheelY = y + 2 * SCALE;
-    const absVel = Math.abs(robot.velocityX);
+    const wheelRadius = 10;
+    const wheelY = y + 1;
 
-    // Draw wheel - clean ellipse, no blur effects
-    ctx.save();
-    ctx.translate(x, wheelY);
-
-    // Oblong deformation when moving
-    const deformAmount = Math.min(absVel / 12, 0.3);
-    if (absVel > 0.5 && !isAfterimage) {
-        ctx.scale(1 + deformAmount, 1 - deformAmount * 0.5);
-    }
-
-    // Just the outline
-    ctx.strokeStyle = isAfterimage ? '#555555' : '#ffffff';
-    ctx.lineWidth = 2 * SCALE;
+    // Wheel
+    ctx.strokeStyle = isAfterimage ? '#4a4a6a' : '#e8e8ff';
+    ctx.lineWidth = isAfterimage ? 1 : 2;
     ctx.beginPath();
-    ctx.arc(0, 0, wheelRadius, 0, Math.PI * 2);
+    ctx.arc(x, wheelY, wheelRadius, 0, Math.PI * 2);
     ctx.stroke();
-
-    ctx.restore();
 
     // Arm and blade
     if (armExtension > 0.01) {
         const pivotX = x;
-        const pivotY = y - wheelRadius - 5 * SCALE;
+        const pivotY = y - wheelRadius - 2;
 
-        // Pivot joint
-        ctx.strokeStyle = isAfterimage ? '#555555' : '#ffffff';
-        ctx.lineWidth = 2 * SCALE;
+        // Pivot
         ctx.beginPath();
-        ctx.arc(pivotX, pivotY, 4 * SCALE, 0, Math.PI * 2);
+        ctx.arc(pivotX, pivotY, 2, 0, Math.PI * 2);
         ctx.stroke();
 
         // Arm
-        const armLength = 25 * SCALE * armExtension;
+        const armLength = 12 * armExtension;
         const armEndX = pivotX + Math.cos(armAng) * armLength;
         const armEndY = pivotY + Math.sin(armAng) * armLength;
 
-        ctx.strokeStyle = isAfterimage ? '#555555' : '#ffffff';
-        ctx.lineWidth = 2 * SCALE;
-        ctx.lineCap = 'round';
+        ctx.lineWidth = isAfterimage ? 1 : 2;
         ctx.beginPath();
         ctx.moveTo(pivotX, pivotY);
         ctx.lineTo(armEndX, armEndY);
@@ -577,13 +781,13 @@ function drawRobot(x, y, alpha = 1, armAng = -Math.PI/2, bladeAng = 0, wheelRot 
 
         // Blade
         if (bladeExt > 0.01) {
-            const bladeLength = 120 * SCALE * bladeExt;
+            const bladeLength = 60 * bladeExt;
             const totalBladeAngle = armAng + bladeAng;
             const bladeTipX = armEndX + Math.cos(totalBladeAngle) * bladeLength;
             const bladeTipY = armEndY + Math.sin(totalBladeAngle) * bladeLength;
 
-            ctx.strokeStyle = isAfterimage ? '#666666' : '#ffffff';
-            ctx.lineWidth = 1.5 * SCALE;
+            ctx.strokeStyle = isAfterimage ? '#5a5a7a' : '#ffffff';
+            ctx.lineWidth = isAfterimage ? 1 : 2;
             ctx.beginPath();
             ctx.moveTo(armEndX, armEndY);
             ctx.lineTo(bladeTipX, bladeTipY);
@@ -591,22 +795,30 @@ function drawRobot(x, y, alpha = 1, armAng = -Math.PI/2, bladeAng = 0, wheelRot 
         }
     }
 
-    ctx.restore();
+    ctx.globalAlpha = 1;
 }
 
 function drawUI() {
-    ctx.fillStyle = '#666666';
-    ctx.font = '12px monospace';
-
-    const vx = Math.abs(robot.velocityX).toFixed(1);
-    ctx.fillText(`vel: ${vx}`, 20, 25);
+    ctx.fillStyle = '#7070a0';
+    ctx.font = 'bold 13px monospace';
 
     // Target count
     const alive = targets.filter(t => t.alive).length;
-    ctx.fillText(`targets: ${alive}/${targets.length}`, 20, 40);
+    ctx.fillText(`targets: ${alive}/${targets.length}`, 20, 25);
+
+    // Best combo
+    if (robot.bestCombo > 1) {
+        ctx.fillText(`best combo: ${robot.bestCombo}x`, 20, 42);
+    }
+
+    // Slowmo indicator
+    if (slowmo) {
+        ctx.fillStyle = '#6699ff';
+        ctx.fillText('[SLOWMO]', canvas.width - 100, 25);
+    }
 
     if (robot.attackState !== 'idle') {
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = '#c0c0e0';
         let mode = '';
         switch(robot.attackState) {
             case 'jab-left': mode = robot.attackHeld ? '[JAB_L_HOLD]' : '[JAB_L]'; break;
@@ -616,7 +828,7 @@ function drawUI() {
             case 'swing-rl': mode = '[SWING_RL]'; break;
             case 'swing-up': mode = '[SWING_UP]'; break;
         }
-        ctx.fillText(mode, canvas.width - 130, 25);
+        ctx.fillText(mode, canvas.width - 100, 42);
     }
 }
 
@@ -626,4 +838,6 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
+// Initialize and start
+initBackground();
 gameLoop();
