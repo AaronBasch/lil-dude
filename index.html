@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>unicycle_robot</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #000000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: monospace;
+        }
+        #gameContainer {
+            position: relative;
+        }
+        canvas {
+            display: block;
+            border: 1px solid #444444;
+        }
+        #controls {
+            position: absolute;
+            bottom: -60px;
+            left: 0;
+            color: #666666;
+            font-size: 11px;
+            line-height: 1.8;
+        }
+        #controls span {
+            color: #888888;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="game"></canvas>
+        <div id="controls">
+            <span>$</span> W/↑/Space=jump | A/←=left | D/→=right | Q/Z=jab_l | E/X=jab_r | S=jab_up | hold+other=swing
+        </div>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>
