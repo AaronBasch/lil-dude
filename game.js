@@ -1,3 +1,6 @@
+// Testing: change this to start at any level
+const DEBUG_START_LEVEL = 10;
+
 // Canvas setup
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -59,7 +62,7 @@ const player = {
     y: 300,
     vx: 0,
     vy: 0,
-    radius: 12, // Player circle radius
+    radius: 5, // Player circle radius
     speed: 5,
 
     armAngle: -Math.PI / 2,
@@ -903,6 +906,6 @@ function gameLoop() {
 }
 
 // Initialize with starting level
-startLevel(1);
+startLevel(DEBUG_START_LEVEL);
 
 gameLoop();
