@@ -26,6 +26,12 @@ let slowmoFactor = 0.35;
 // Hit particles
 const hitParticles = [];
 
+// Freeze frame state
+let freezeFrames = 0;
+
+// Blade glow (decays over time)
+let bladeGlow = 0;
+
 // Game state
 const game = {
     lives: 3,
@@ -149,7 +155,9 @@ function spawnFamily() {
             familyId: familyId,
             alive: true,
             opacity: 1, // Goes transparent when hit but family not complete
-            hit: false  // Has been hit during vulnerability window
+            hit: false, // Has been hit during vulnerability window
+            dying: false, // Death animation in progress
+            deathTimer: 0 // For shrink animation
         };
 
         // Clamp initial position
@@ -180,17 +188,27 @@ function startLevel(level) {
     }
 }
 
-// Check if level is complete
+// Check if level is complete (no alive or dying targets)
 function checkLevelComplete() {
-    let aliveCount = 0;
     for (const f of families) {
-        aliveCount += f.members.filter(m => m.alive).length;
+        for (const m of f.members) {
+            if (m.alive || m.dying) return false;
+        }
     }
-    return aliveCount === 0;
+    return true;
 }
 
 function update() {
     if (game.gameOver) return;
+
+    // Handle freeze frames (brief pause on family elimination)
+    if (freezeFrames > 0) {
+        freezeFrames--;
+        // Still update visual effects during freeze
+        bladeGlow *= 0.9;
+        updateDyingTargets();
+        return;
+    }
 
     // Handle level transition pause
     if (game.levelTransition > 0) {
@@ -204,6 +222,9 @@ function update() {
     // Hold space for fast mode
     slowmoFactor = keys[' '] ? 1 : 0.35;
     const dt = slowmoFactor;
+
+    // Decay blade glow
+    bladeGlow *= 0.92;
 
     // Player movement with arrows - immediate stop, no sliding
     player.vx = 0;
@@ -309,9 +330,12 @@ function update() {
         if (p.alpha <= 0) hitParticles.splice(i, 1);
     }
 
-    // Clean up dead families
+    // Update dying targets
+    updateDyingTargets();
+
+    // Clean up dead families (only after death animations complete)
     for (let i = families.length - 1; i >= 0; i--) {
-        if (families[i].members.every(m => !m.alive)) {
+        if (families[i].members.every(m => !m.alive && !m.dying)) {
             families.splice(i, 1);
         }
     }
@@ -438,44 +462,70 @@ function hitFamilyMember(target, family) {
     target.hit = true;
     target.opacity = 0.3;
 
-    createHitParticles(target.x, target.y);
+    createHitParticles(target.x, target.y, family.color, family.shape);
+    bladeGlow = 1; // Blade glows on hit
 
     // Check if all family members are hit
     const allHit = family.members.every(m => m.hit || !m.alive);
     if (allHit) {
         // Eliminate the family!
+        const familySize = family.members.filter(m => m.alive).length;
         for (const member of family.members) {
             if (member.alive) {
                 killTarget(member, family);
             }
         }
         vulnerability.familyId = null;
-    }
 
-    player.screenShake.x = (Math.random() - 0.5) * 4;
-    player.screenShake.y = (Math.random() - 0.5) * 4;
+        // Family elimination effects
+        freezeFrames = 4; // Brief freeze (~67ms at 60fps)
+
+        // Bigger shake for family elimination
+        player.screenShake.x = (Math.random() - 0.5) * (6 + familySize * 2);
+        player.screenShake.y = (Math.random() - 0.5) * (6 + familySize * 2);
+    } else {
+        player.screenShake.x = (Math.random() - 0.5) * 4;
+        player.screenShake.y = (Math.random() - 0.5) * 4;
+    }
 }
 
 function killTarget(target, family) {
     target.alive = false;
+    target.dying = true;
+    target.deathTimer = 1; // Start death animation
     game.score++;
-    createHitParticles(target.x, target.y);
-
-    player.screenShake.x = (Math.random() - 0.5) * 6;
-    player.screenShake.y = (Math.random() - 0.5) * 6;
+    createHitParticles(target.x, target.y, family.color, family.shape);
+    bladeGlow = 1;
 }
 
-function createHitParticles(x, y) {
-    for (let p = 0; p < 6; p++) {
-        const angle = (p / 6) * Math.PI * 2 + Math.random() * 0.5;
-        const speed = 2 + Math.random() * 3;
+function createHitParticles(x, y, color = COLORS.bright, shape = null) {
+    const count = shape ? 5 : 6; // Fewer shape particles since they're bigger
+    for (let p = 0; p < count; p++) {
+        const angle = (p / count) * Math.PI * 2 + Math.random() * 0.5;
+        const speed = 1.5 + Math.random() * 2;
         hitParticles.push({
             x: x,
             y: y,
             vx: Math.cos(angle) * speed,
             vy: Math.sin(angle) * speed,
-            alpha: 1
+            alpha: 1,
+            shape: shape,
+            size: shape ? (8 + Math.random() * 8) : 4, // Bigger if shape
+            rotation: Math.random() * Math.PI * 2
         });
+    }
+}
+
+function updateDyingTargets() {
+    for (const family of families) {
+        for (const target of family.members) {
+            if (target.dying) {
+                target.deathTimer -= 0.08;
+                if (target.deathTimer <= 0) {
+                    target.dying = false;
+                }
+            }
+        }
     }
 }
 
@@ -612,19 +662,35 @@ function drawTargets() {
         const blinkOn = isVulnerable && Math.floor(Date.now() / 100) % 2 === 0;
 
         for (const target of family.members) {
-            if (!target.alive) continue;
+            // Draw dying targets with shrink animation
+            if (target.dying) {
+                ctx.globalAlpha = target.deathTimer * 0.8;
+                ctx.strokeStyle = family.color;
+                ctx.lineWidth = 2;
+                const shrinkRadius = target.radius * target.deathTimer;
+                drawShape(target.x, target.y, shrinkRadius, family.shape);
+                ctx.globalAlpha = 1;
+                continue;
+            }
 
-            ctx.globalAlpha = target.opacity;
+            if (!target.alive) continue;
 
             let color = family.color;
             if (isVulnerable && blinkOn) {
                 color = COLORS.vulnerable;
             }
 
+            // Draw diffused/bigger shape behind (aura effect)
+            ctx.globalAlpha = target.opacity * 0.15;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            drawShape(target.x, target.y, target.radius * 1.8, family.shape);
+
+            // Draw main shape
+            ctx.globalAlpha = target.opacity;
             ctx.strokeStyle = color;
             ctx.fillStyle = color;
             ctx.lineWidth = 2;
-
             drawShape(target.x, target.y, target.radius, family.shape);
 
             ctx.globalAlpha = 1;
@@ -698,10 +764,24 @@ function drawShape(x, y, radius, shape) {
 }
 
 function drawHitParticles() {
-    ctx.fillStyle = COLORS.bright;
     for (const p of hitParticles) {
-        ctx.globalAlpha = p.alpha;
-        ctx.fillRect((p.x - 2) | 0, (p.y - 2) | 0, 4, 4);
+        ctx.globalAlpha = p.alpha * 0.6; // More diffused/transparent
+        ctx.strokeStyle = COLORS.dim;
+        ctx.lineWidth = 1;
+
+        if (p.shape) {
+            // Draw expanding shape particle
+            const expandedSize = p.size * (2 - p.alpha); // Gets bigger as it fades
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.rotation);
+            drawShape(0, 0, expandedSize, p.shape);
+            ctx.restore();
+        } else {
+            // Simple dot for non-shape particles
+            ctx.fillStyle = COLORS.dim;
+            ctx.fillRect((p.x - 2) | 0, (p.y - 2) | 0, 4, 4);
+        }
     }
     ctx.globalAlpha = 1;
 }
@@ -758,6 +838,21 @@ function drawPlayer() {
             const bladeTipX = armEndX + Math.cos(totalBladeAngle) * bladeLength;
             const bladeTipY = armEndY + Math.sin(totalBladeAngle) * bladeLength;
 
+            // Blade glow effect (thicker, brighter line behind)
+            if (bladeGlow > 0.1) {
+                ctx.globalAlpha = bladeGlow * 0.5;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 4 + bladeGlow * 3;
+                ctx.beginPath();
+                ctx.moveTo(armEndX | 0, armEndY | 0);
+                ctx.lineTo(bladeTipX | 0, bladeTipY | 0);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
+
+            // Normal blade
+            ctx.strokeStyle = COLORS.bright;
+            ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.moveTo(armEndX | 0, armEndY | 0);
             ctx.lineTo(bladeTipX | 0, bladeTipY | 0);
