@@ -1,6 +1,6 @@
 # unicycle_robot
 
-A minimalist action game featuring a unicycle robot with a blade arm, set against a moonlit mountain path with glowing paper lanterns.
+A minimalist arena survival game. Eliminate shape-coded target families before they overwhelm you.
 
 ## Quick Start
 
@@ -13,27 +13,30 @@ open index.html
 ## Controls
 
 **Movement**
-- `←` / `→` — Move left/right
-- `↑` — Jump (from ground) / Move up (while airborne)
-- `↓` — Move down (while airborne)
+- `←` `→` `↑` `↓` — Move in any direction
 
 **Attacks (WASD)**
 - `W` — Jab up
 - `A` — Jab left
 - `S` — Jab down
 - `D` — Jab right
+- Hold any direction to extend the blade
 
-**Combos**
-- Hold one attack key, then press another for swing attacks
-- `A` + `D` or `D` + `A` — Horizontal swing
-- `W` + `S` or `S` + `W` — Vertical swing
-- Any other combination — Diagonal swing
+**Speed**
+- Hold `Space` — Fast mode
 
-**Slowmo**
-- Hold `Space` while airborne — Slow motion (helps line up combos)
+## Gameplay
+
+- Targets spawn in families (1-4 members) that share the same shape and color
+- Hit all family members within the vulnerability window to eliminate them
+- If you don't eliminate the whole family in time, hit members recover
+- Colliding with active targets costs a life (you have 3)
+- Each level spawns more families
+- Clear all targets to advance to the next level
 
 ## Tips
 
-- Destroy multiple lanterns in a single jump for combo multipliers
-- Higher lanterns are worth attempting—use slowmo to aim
-- Lanterns are color-coded by height: orange (ground), pink (low), blue (mid), violet (high)
+- When you hit a target, its family starts blinking — hit the rest quickly
+- Transparent (hit) family members won't damage you
+- Larger families are harder but more rewarding
+- Use fast mode to close distance, slow mode to line up attacks
