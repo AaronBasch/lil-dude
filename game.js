@@ -6,7 +6,6 @@ canvas.width = 1200;
 canvas.height = 600;
 
 const keys = {};
-const keyPressOrder = []; // Track order of attack key presses for swing direction
 
 // Minimal color palette
 const COLORS = {
@@ -22,7 +21,7 @@ const COLORS = {
 const SHAPES = ['triangle', 'square', 'diamond', 'pentagon', 'hexagon', 'star'];
 
 // Speed system - slow by default, hold space for fast
-let slowmoFactor = 0.25;
+let slowmoFactor = 0.35;
 
 // Hit particles
 const hitParticles = [];
@@ -32,10 +31,10 @@ const game = {
     lives: 3,
     score: 0,
     level: 1,
-    spawnTimer: 0,
-    baseSpawnInterval: 300, // frames between spawns, decreases with level
     gameOver: false,
-    familyIdCounter: 0
+    familyIdCounter: 0,
+    levelTransition: 0, // Countdown for level transition pause
+    levelTransitionDuration: 90 // ~1.5 seconds at 60fps
 };
 
 // Vulnerability state - which family is currently vulnerable
@@ -64,13 +63,8 @@ const player = {
 
     attackState: 'idle',
     attackProgress: 0,
-    attackHeld: null,
+    attackHeld: null, // Which direction key is held
     strikeTrail: [],
-
-    // For swing direction calculation
-    swingStartAngle: 0,
-    swingEndAngle: 0,
-    swingDirection: 1, // 1 = clockwise, -1 = counter-clockwise
 
     screenShake: { x: 0, y: 0 },
     invulnerable: 0 // Invulnerability frames after being hit
@@ -78,24 +72,27 @@ const player = {
 
 // Direction angles for WASD
 const DIRECTION_ANGLES = {
-    'up': -Math.PI / 2,
-    'down': Math.PI / 2,
-    'left': Math.PI,
-    'right': 0
+    'w': -Math.PI / 2,  // up
+    's': Math.PI / 2,   // down
+    'a': Math.PI,       // left
+    'd': 0              // right
 };
 
 // Input handling
 document.addEventListener('keydown', (e) => {
     const key = e.key.toLowerCase();
 
-    if (!keys[key] && !keys[e.key]) {
+    if (!keys[key]) {
         keys[key] = true;
         keys[e.key] = true;
 
-        if (key === 'a') handleAttackPress('left');
-        else if (key === 'd') handleAttackPress('right');
-        else if (key === 'w') handleAttackPress('up');
-        else if (key === 's') handleAttackPress('down');
+        // WASD for jabs
+        if (['w', 'a', 's', 'd'].includes(key)) {
+            player.attackState = 'jab-' + key;
+            player.attackProgress = 0;
+            player.strikeTrail = [];
+            player.attackHeld = key;
+        }
     }
 
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
@@ -108,64 +105,11 @@ document.addEventListener('keyup', (e) => {
     keys[key] = false;
     keys[e.key] = false;
 
-    if (key === 'a') handleAttackRelease('left');
-    else if (key === 'd') handleAttackRelease('right');
-    else if (key === 'w') handleAttackRelease('up');
-    else if (key === 's') handleAttackRelease('down');
+    // Release held attack
+    if (player.attackHeld === key) {
+        player.attackHeld = null;
+    }
 });
-
-function handleAttackPress(direction) {
-    const now = performance.now();
-    keyPressOrder.push({ direction, time: now });
-
-    // Keep only recent presses (within 150ms)
-    const recentPresses = keyPressOrder.filter(p => now - p.time < 150);
-    keyPressOrder.length = 0;
-    keyPressOrder.push(...recentPresses);
-
-    if (player.attackHeld && player.attackHeld !== direction) {
-        // Calculate swing between two directions
-        const startAngle = DIRECTION_ANGLES[player.attackHeld];
-        const endAngle = DIRECTION_ANGLES[direction];
-
-        // Determine if we should take the long way (270 degrees)
-        // This happens if 3+ directions were pressed quickly
-        const takeLongWay = keyPressOrder.length >= 3;
-
-        // Calculate shortest angular distance
-        let diff = endAngle - startAngle;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-
-        player.swingStartAngle = startAngle;
-        player.swingEndAngle = endAngle;
-
-        if (takeLongWay) {
-            // Take the long way around (270 degrees)
-            player.swingDirection = diff > 0 ? -1 : 1;
-        } else {
-            // Take the short way
-            player.swingDirection = diff > 0 ? 1 : -1;
-        }
-
-        player.attackState = 'swing';
-        player.attackProgress = 0;
-        player.strikeTrail = [];
-        player.attackHeld = null;
-    } else {
-        // Start a jab
-        player.attackState = 'jab-' + direction;
-        player.attackProgress = 0;
-        player.strikeTrail = [];
-        player.attackHeld = direction;
-    }
-}
-
-function handleAttackRelease(direction) {
-    if (player.attackHeld === direction) {
-        player.attackHeld = null;
-    }
-}
 
 // Spawn a new family
 function spawnFamily() {
@@ -223,14 +167,45 @@ function getFamilyById(id) {
     return families.find(f => f.id === id);
 }
 
+// Start a new level
+function startLevel(level) {
+    game.level = level;
+    families.splice(0, families.length);
+    vulnerability.familyId = null;
+    vulnerability.timer = 0;
+
+    const startingFamilies = 3 + (level - 1);
+    for (let i = 0; i < startingFamilies; i++) {
+        spawnFamily();
+    }
+}
+
+// Check if level is complete
+function checkLevelComplete() {
+    let aliveCount = 0;
+    for (const f of families) {
+        aliveCount += f.members.filter(m => m.alive).length;
+    }
+    return aliveCount === 0;
+}
+
 function update() {
     if (game.gameOver) return;
+
+    // Handle level transition pause
+    if (game.levelTransition > 0) {
+        game.levelTransition--;
+        if (game.levelTransition === 0) {
+            startLevel(game.level + 1);
+        }
+        return;
+    }
 
     // Hold space for fast mode
     slowmoFactor = keys[' '] ? 1 : 0.35;
     const dt = slowmoFactor;
 
-    // Player movement - immediate stop, no sliding
+    // Player movement with arrows - immediate stop, no sliding
     player.vx = 0;
     player.vy = 0;
     if (keys['ArrowLeft']) player.vx = -player.speed;
@@ -297,26 +272,17 @@ function update() {
         }
     }
 
-    // Spawning
-    game.spawnTimer += dt;
-    const spawnInterval = Math.max(60, game.baseSpawnInterval - (game.level - 1) * 30);
-    if (game.spawnTimer >= spawnInterval) {
-        game.spawnTimer = 0;
-        spawnFamily();
-    }
+    // Check for level complete (no more spawning during level)
+    if (checkLevelComplete() && families.length > 0 || (families.length === 0 && game.level > 0)) {
+        // Clean up any remaining dead families first
+        for (let i = families.length - 1; i >= 0; i--) {
+            if (families[i].members.every(m => !m.alive)) {
+                families.splice(i, 1);
+            }
+        }
 
-    // Level up based on score
-    const newLevel = Math.floor(game.score / 10) + 1;
-    if (newLevel > game.level) {
-        game.level = newLevel;
-        // Clear all families and respawn with base amount + (level - 1)
-        families.splice(0, families.length); // Clear array
-        vulnerability.familyId = null;
-        vulnerability.timer = 0;
-        game.spawnTimer = 0; // Reset spawn timer
-        const startingFamilies = 3 + (game.level - 1); // Level 2 = 4, Level 3 = 5, etc.
-        for (let i = 0; i < startingFamilies; i++) {
-            spawnFamily();
+        if (checkLevelComplete()) {
+            game.levelTransition = game.levelTransitionDuration;
         }
     }
 
@@ -356,7 +322,7 @@ function checkPlayerCollisions() {
 
     for (const family of families) {
         for (const target of family.members) {
-            if (!target.alive) continue;
+            if (!target.alive || target.hit) continue; // Skip dead or transparent (hit) targets
 
             // Check collision
             const dx = player.x - target.x;
@@ -399,7 +365,7 @@ function checkTargetCollisions() {
         for (const target of family.members) {
             if (!target.alive || target.hit) continue;
 
-            // Line-circle intersection (simplified, no wraparound for blade)
+            // Line-circle intersection
             const dx = bladeTipX - armEndX;
             const dy = bladeTipY - armEndY;
             const fx = armEndX - target.x;
@@ -425,7 +391,6 @@ function checkTargetCollisions() {
     if (hits.length === 0) return;
 
     // Process hits - favor the player
-    // Separate into: singletons, already-vulnerable family members, other
     const singletons = hits.filter(h => h.family.members.length === 1);
     const vulnerableHits = hits.filter(h =>
         h.family.id === vulnerability.familyId && h.family.members.length > 1
@@ -445,16 +410,13 @@ function checkTargetCollisions() {
     }
 
     // For others: if no vulnerable family, make the first one vulnerable
-    // If there's already a vulnerable family, ignore (favor player)
     if (otherHits.length > 0 && vulnerability.familyId === null) {
         const { target, family } = otherHits[0];
-        // Make this family vulnerable
         vulnerability.familyId = family.id;
         vulnerability.timer = vulnerability.duration;
         hitFamilyMember(target, family);
     } else if (otherHits.length > 0 && vulnerability.familyId !== null) {
-        // Wrong family hit while another is vulnerable
-        // Reset the old family and make this one vulnerable
+        // Wrong family hit while another is vulnerable - reset old, start new
         const oldFamily = getFamilyById(vulnerability.familyId);
         if (oldFamily) {
             for (const member of oldFamily.members) {
@@ -476,7 +438,6 @@ function hitFamilyMember(target, family) {
     target.hit = true;
     target.opacity = 0.3;
 
-    // Create particles
     createHitParticles(target.x, target.y);
 
     // Check if all family members are hit
@@ -521,12 +482,8 @@ function createHitParticles(x, y) {
 function updateAttack(dt) {
     const easeOutQuart = (t) => 1 - Math.pow(1 - t, 4);
     const easeOutQuint = (t) => 1 - Math.pow(1 - t, 5);
-    const easeInOut = (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
     const isJab = player.attackState.startsWith('jab-');
-    const isSwing = player.attackState === 'swing';
-
-    // Attack speed affected by slowmo
     const attackSpeed = dt;
 
     if (isJab) {
@@ -542,10 +499,12 @@ function updateAttack(dt) {
         player.armAngle = DIRECTION_ANGLES[direction];
 
         if (held) {
+            // Held - extend and stay extended
             player.armExtension = easeOutQuint(Math.min(p / 0.2, 1));
             const bladeP = Math.max(0, (p - 0.1) / 0.4);
             player.bladeExtension = easeOutQuart(Math.min(bladeP, 1)) * 1.5;
         } else {
+            // Released - complete jab and retract
             if (p < 0.2) {
                 player.armExtension = easeOutQuint(p / 0.2);
                 player.bladeExtension = 0;
@@ -570,49 +529,8 @@ function updateAttack(dt) {
             addTrailPoint();
         }
 
-    } else if (isSwing) {
-        player.attackProgress += 0.16 * attackSpeed;
-
-        if (player.attackProgress >= 1) {
-            player.attackState = 'idle';
-            player.attackProgress = 0;
-            player.armExtension = 0;
-            player.bladeExtension = 0;
-        } else {
-            const p = player.attackProgress;
-
-            player.armExtension = 1;
-            player.bladeExtension = 1.2;
-
-            // Calculate swing arc
-            let startAngle = player.swingStartAngle;
-            let endAngle = player.swingEndAngle;
-
-            // Determine arc length
-            let diff = endAngle - startAngle;
-            while (diff > Math.PI) diff -= Math.PI * 2;
-            while (diff < -Math.PI) diff += Math.PI * 2;
-
-            let arcLength;
-            if (player.swingDirection === 1) {
-                // Clockwise - positive direction
-                arcLength = diff > 0 ? diff : (Math.PI * 2 + diff);
-            } else {
-                // Counter-clockwise - negative direction
-                arcLength = diff < 0 ? diff : (diff - Math.PI * 2);
-            }
-
-            player.armAngle = startAngle + easeInOut(p) * arcLength;
-            player.bladeAngle = Math.sin(p * Math.PI) * 0.15;
-
-            if (p > 0.2 && p < 0.8) {
-                player.screenShake.x = (Math.random() - 0.5) * 3;
-                player.screenShake.y = (Math.random() - 0.5) * 2;
-            }
-        }
-        addTrailPoint();
-
     } else {
+        // Idle - retract blade
         player.armAngle += (-Math.PI/2 - player.armAngle) * 0.15;
         player.bladeAngle *= 0.8;
         player.bladeExtension *= 0.85;
@@ -661,6 +579,17 @@ function draw() {
     drawUI();
     ctx.restore();
 
+    // Level transition screen
+    if (game.levelTransition > 0) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = COLORS.bright;
+        ctx.font = '48px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`LEVEL ${game.level + 1}`, canvas.width / 2, canvas.height / 2);
+        ctx.textAlign = 'left';
+    }
+
     // Game over screen
     if (game.gameOver) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -687,7 +616,6 @@ function drawTargets() {
 
             ctx.globalAlpha = target.opacity;
 
-            // Color based on vulnerability state
             let color = family.color;
             if (isVulnerable && blinkOn) {
                 color = COLORS.vulnerable;
@@ -819,13 +747,11 @@ function drawPlayer() {
         const armEndX = player.x + Math.cos(player.armAngle) * armLength;
         const armEndY = player.y + Math.sin(player.armAngle) * armLength;
 
-        // Arm
         ctx.beginPath();
         ctx.moveTo(player.x, player.y);
         ctx.lineTo(armEndX | 0, armEndY | 0);
         ctx.stroke();
 
-        // Blade
         if (player.bladeExtension > 0.01) {
             const bladeLength = 70 * player.bladeExtension;
             const totalBladeAngle = player.armAngle + player.bladeAngle;
@@ -881,9 +807,7 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
-// Initialize with some starting targets
-for (let i = 0; i < 3; i++) {
-    spawnFamily();
-}
+// Initialize with starting level
+startLevel(1);
 
 gameLoop();
