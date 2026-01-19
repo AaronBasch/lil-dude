@@ -26,6 +26,89 @@ const SHAPES = ['triangle', 'square', 'diamond', 'pentagon', 'hexagon', 'star'];
 // Speed system - slow by default, hold space for fast
 let slowmoFactor = 0.35;
 
+// Audio system
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let audioStarted = false;
+
+// Background music
+const bgMusic = new Audio('backing_loop.mp3');
+bgMusic.loop = true;
+bgMusic.volume = 0.4;
+
+// Start audio on first user interaction
+function startAudio() {
+    if (audioStarted) return;
+    audioStarted = true;
+    audioCtx.resume();
+    bgMusic.play().catch(() => {});
+}
+
+// Synthesized sound effects
+function playSound(type) {
+    if (!audioStarted) return;
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+
+    switch(type) {
+        case 'hit': // Quick blip when hitting a target
+            osc.frequency.setValueAtTime(880, now);
+            osc.frequency.exponentialRampToValueAtTime(440, now + 0.1);
+            gain.gain.setValueAtTime(0.15, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc.start(now);
+            osc.stop(now + 0.1);
+            break;
+
+        case 'kill': // Satisfying sweep when family eliminated
+            osc.frequency.setValueAtTime(220, now);
+            osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+            osc.start(now);
+            osc.stop(now + 0.2);
+            break;
+
+        case 'hurt': // Low thud when player hit
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, now);
+            osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
+            gain.gain.setValueAtTime(0.25, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+            osc.start(now);
+            osc.stop(now + 0.25);
+            break;
+
+        case 'levelup': // Ascending arpeggio
+            [440, 550, 660, 880].forEach((freq, i) => {
+                const o = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                o.connect(g);
+                g.connect(audioCtx.destination);
+                o.frequency.setValueAtTime(freq, now + i * 0.08);
+                g.gain.setValueAtTime(0.15, now + i * 0.08);
+                g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.08 + 0.15);
+                o.start(now + i * 0.08);
+                o.stop(now + i * 0.08 + 0.15);
+            });
+            return; // Early return since we created our own oscillators
+
+        case 'gameover': // Descending tone
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(440, now);
+            osc.frequency.exponentialRampToValueAtTime(55, now + 0.8);
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+            osc.start(now);
+            osc.stop(now + 0.8);
+            break;
+    }
+}
+
 // Hit particles
 const hitParticles = [];
 
@@ -92,6 +175,7 @@ const DIRECTION_ANGLES = {
 
 // Input handling
 document.addEventListener('keydown', (e) => {
+    startAudio(); // Start audio on first interaction
     const key = e.key.toLowerCase();
 
     if (!keys[key]) {
@@ -295,6 +379,7 @@ function update() {
         game.levelTransition--;
         if (game.levelTransition === 0) {
             startLevel(game.level + 1);
+            playSound('levelup');
         }
         return;
     }
@@ -386,6 +471,9 @@ function checkPlayerCollisions() {
 
                 if (game.lives <= 0) {
                     game.gameOver = true;
+                    playSound('gameover');
+                } else {
+                    playSound('hurt');
                 }
                 return;
             }
@@ -488,11 +576,13 @@ function hitFamilyMember(target, family) {
 
     createHitParticles(target.x, target.y, family.color, family.shape);
     bladeGlow = 1; // Blade glows on hit
+    playSound('hit');
 
     // Check if all family members are hit
     const allHit = family.members.every(m => m.hit || !m.alive);
     if (allHit) {
         // Eliminate the family!
+        playSound('kill');
         const familySize = family.members.filter(m => m.alive).length;
         for (const member of family.members) {
             if (member.alive) {
