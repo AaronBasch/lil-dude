@@ -2,69 +2,60 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-canvas.width = 900;
-canvas.height = 500;
-
-// Offscreen canvas for cached background
-const bgCanvas = document.createElement('canvas');
-bgCanvas.width = canvas.width;
-bgCanvas.height = canvas.height;
-const bgCtx = bgCanvas.getContext('2d');
+canvas.width = 1200;
+canvas.height = 600;
 
 const keys = {};
-const GROUND_Y = canvas.height - 60;
+const keyPressOrder = []; // Track order of attack key presses for swing direction
 
 // Minimal color palette
 const COLORS = {
     bg: '#08080c',
-    mid: '#151520',
     dim: '#252535',
     line: '#404055',
-    bright: '#ffffff'
+    bright: '#ffffff',
+    vulnerable: '#ff6666',
+    shapes: ['#66ffcc', '#ffcc66', '#cc66ff', '#66ccff', '#ff66cc', '#ccff66']
 };
 
-// World scrolling
-let worldScroll = 0;
+// Shape types for families (distinct from player's circle)
+const SHAPES = ['triangle', 'square', 'diamond', 'pentagon', 'hexagon', 'star'];
 
-// Slowmo system
-let slowmo = false;
-let slowmoFactor = 1;
+// Speed system - slow by default, hold space for fast
+let slowmoFactor = 0.25;
 
-// Hit particles (minimal)
+// Hit particles
 const hitParticles = [];
 
-// Foreground silhouettes - clean triangles
-const silhouettes = [
-    { worldX: -100, height: 320, width: 60 },
-    { worldX: 150, height: 180, width: 30 },
-    { worldX: 380, height: 260, width: 45 },
-    { worldX: 520, height: 140, width: 35 },
-    { worldX: 750, height: 290, width: 55 },
-    { worldX: 950, height: 200, width: 35 },
-    { worldX: 1150, height: 350, width: 65 },
-    { worldX: 1350, height: 170, width: 40 },
-    { worldX: 1550, height: 240, width: 38 },
-    { worldX: 1780, height: 310, width: 58 },
-    { worldX: 1950, height: 190, width: 42 },
-    { worldX: 2150, height: 280, width: 48 },
-];
+// Game state
+const game = {
+    lives: 3,
+    score: 0,
+    level: 1,
+    spawnTimer: 0,
+    baseSpawnInterval: 300, // frames between spawns, decreases with level
+    gameOver: false,
+    familyIdCounter: 0
+};
 
-// Robot character
-const robot = {
-    x: 150,
-    y: GROUND_Y,
-    velocityX: 0,
-    velocityY: 0,
-    isJumping: false,
+// Vulnerability state - which family is currently vulnerable
+const vulnerability = {
+    familyId: null,
+    timer: 0,
+    duration: 180 // ~3 seconds at 60fps
+};
 
-    speed: 30,
-    jumpForce: -18,
-    gravity: 0.6,
-    friction: 0.85,
+// Families array - each family has id, shape, color, members array
+const families = [];
 
-    combo: 0,
-    comboTimer: 0,
-    bestCombo: 0,
+// Player character
+const player = {
+    x: 600,
+    y: 300,
+    vx: 0,
+    vy: 0,
+    radius: 12, // Player circle radius
+    speed: 5,
 
     armAngle: -Math.PI / 2,
     bladeAngle: 0,
@@ -76,36 +67,22 @@ const robot = {
     attackHeld: null,
     strikeTrail: [],
 
-    wheelRotation: 0,
-    afterimages: [],
-    screenShake: { x: 0, y: 0 }
+    // For swing direction calculation
+    swingStartAngle: 0,
+    swingEndAngle: 0,
+    swingDirection: 1, // 1 = clockwise, -1 = counter-clockwise
+
+    screenShake: { x: 0, y: 0 },
+    invulnerable: 0 // Invulnerability frames after being hit
 };
 
-// Targets - simple nodes
-const targets = [
-    // Ground level
-    { worldX: 400, x: 400, baseY: GROUND_Y - 25, y: 0, radius: 8, alive: true },
-    { worldX: 900, x: 900, baseY: GROUND_Y - 20, y: 0, radius: 7, alive: true },
-    { worldX: 1500, x: 1500, baseY: GROUND_Y - 25, y: 0, radius: 8, alive: true },
-    { worldX: 2100, x: 2100, baseY: GROUND_Y - 22, y: 0, radius: 7, alive: true },
-    // Low air
-    { worldX: 300, x: 300, baseY: GROUND_Y - 70, y: 0, radius: 7, alive: true },
-    { worldX: 600, x: 600, baseY: GROUND_Y - 90, y: 0, radius: 8, alive: true },
-    { worldX: 1000, x: 1000, baseY: GROUND_Y - 80, y: 0, radius: 7, alive: true },
-    { worldX: 1400, x: 1400, baseY: GROUND_Y - 75, y: 0, radius: 8, alive: true },
-    { worldX: 1800, x: 1800, baseY: GROUND_Y - 85, y: 0, radius: 7, alive: true },
-    // Mid air
-    { worldX: 450, x: 450, baseY: GROUND_Y - 130, y: 0, radius: 6, alive: true },
-    { worldX: 750, x: 750, baseY: GROUND_Y - 150, y: 0, radius: 7, alive: true },
-    { worldX: 1100, x: 1100, baseY: GROUND_Y - 140, y: 0, radius: 7, alive: true },
-    { worldX: 1600, x: 1600, baseY: GROUND_Y - 135, y: 0, radius: 6, alive: true },
-    { worldX: 1950, x: 1950, baseY: GROUND_Y - 145, y: 0, radius: 7, alive: true },
-    // High air
-    { worldX: 550, x: 550, baseY: GROUND_Y - 190, y: 0, radius: 5, alive: true },
-    { worldX: 850, x: 850, baseY: GROUND_Y - 210, y: 0, radius: 6, alive: true },
-    { worldX: 1250, x: 1250, baseY: GROUND_Y - 200, y: 0, radius: 5, alive: true },
-    { worldX: 1700, x: 1700, baseY: GROUND_Y - 195, y: 0, radius: 6, alive: true },
-];
+// Direction angles for WASD
+const DIRECTION_ANGLES = {
+    'up': -Math.PI / 2,
+    'down': Math.PI / 2,
+    'left': Math.PI,
+    'right': 0
+};
 
 // Input handling
 document.addEventListener('keydown', (e) => {
@@ -138,129 +115,222 @@ document.addEventListener('keyup', (e) => {
 });
 
 function handleAttackPress(direction) {
-    if (robot.attackHeld && robot.attackHeld !== direction) {
-        const held = robot.attackHeld;
-        if ((held === 'up' && direction === 'down') || (held === 'down' && direction === 'up')) {
-            robot.attackState = held === 'up' ? 'swing-ud' : 'swing-du';
-        } else if ((held === 'left' && direction === 'right') || (held === 'right' && direction === 'left')) {
-            robot.attackState = held === 'left' ? 'swing-lr' : 'swing-rl';
-        } else {
-            robot.attackState = 'swing-diag';
-        }
-        robot.attackProgress = 0;
-        robot.strikeTrail = [];
-        robot.attackHeld = null;
-    } else {
-        if (direction === 'left') robot.attackState = 'jab-left';
-        else if (direction === 'right') robot.attackState = 'jab-right';
-        else if (direction === 'up') robot.attackState = 'jab-up';
-        else robot.attackState = 'jab-down';
+    const now = performance.now();
+    keyPressOrder.push({ direction, time: now });
 
-        robot.attackProgress = 0;
-        robot.strikeTrail = [];
-        robot.attackHeld = direction;
+    // Keep only recent presses (within 150ms)
+    const recentPresses = keyPressOrder.filter(p => now - p.time < 150);
+    keyPressOrder.length = 0;
+    keyPressOrder.push(...recentPresses);
+
+    if (player.attackHeld && player.attackHeld !== direction) {
+        // Calculate swing between two directions
+        const startAngle = DIRECTION_ANGLES[player.attackHeld];
+        const endAngle = DIRECTION_ANGLES[direction];
+
+        // Determine if we should take the long way (270 degrees)
+        // This happens if 3+ directions were pressed quickly
+        const takeLongWay = keyPressOrder.length >= 3;
+
+        // Calculate shortest angular distance
+        let diff = endAngle - startAngle;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+
+        player.swingStartAngle = startAngle;
+        player.swingEndAngle = endAngle;
+
+        if (takeLongWay) {
+            // Take the long way around (270 degrees)
+            player.swingDirection = diff > 0 ? -1 : 1;
+        } else {
+            // Take the short way
+            player.swingDirection = diff > 0 ? 1 : -1;
+        }
+
+        player.attackState = 'swing';
+        player.attackProgress = 0;
+        player.strikeTrail = [];
+        player.attackHeld = null;
+    } else {
+        // Start a jab
+        player.attackState = 'jab-' + direction;
+        player.attackProgress = 0;
+        player.strikeTrail = [];
+        player.attackHeld = direction;
     }
 }
 
 function handleAttackRelease(direction) {
-    if (robot.attackHeld === direction) {
-        robot.attackHeld = null;
+    if (player.attackHeld === direction) {
+        player.attackHeld = null;
     }
 }
 
+// Spawn a new family
+function spawnFamily() {
+    const familySize = Math.random() < 0.25 ? 1 :
+                       Math.random() < 0.5 ? 2 :
+                       Math.random() < 0.75 ? 3 : 4;
+
+    const shape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+    const color = COLORS.shapes[Math.floor(Math.random() * COLORS.shapes.length)];
+    const familyId = game.familyIdCounter++;
+
+    const family = {
+        id: familyId,
+        shape: shape,
+        color: color,
+        members: []
+    };
+
+    // Spawn members in a cluster, away from player
+    let baseX, baseY;
+    const minDistFromPlayer = 150;
+    do {
+        baseX = Math.random() * (canvas.width - 100) + 50;
+        baseY = Math.random() * (canvas.height - 100) + 50;
+    } while (Math.sqrt((baseX - player.x) ** 2 + (baseY - player.y) ** 2) < minDistFromPlayer);
+
+    for (let i = 0; i < familySize; i++) {
+        const angle = (i / familySize) * Math.PI * 2;
+        const dist = familySize > 1 ? 40 + Math.random() * 20 : 0;
+
+        const target = {
+            x: baseX + Math.cos(angle) * dist,
+            y: baseY + Math.sin(angle) * dist,
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: (Math.random() - 0.5) * 0.5,
+            radius: 15,
+            familyId: familyId,
+            alive: true,
+            opacity: 1, // Goes transparent when hit but family not complete
+            hit: false  // Has been hit during vulnerability window
+        };
+
+        // Clamp initial position
+        target.x = Math.max(target.radius, Math.min(canvas.width - target.radius, target.x));
+        target.y = Math.max(target.radius, Math.min(canvas.height - target.radius, target.y));
+
+        family.members.push(target);
+    }
+
+    families.push(family);
+}
+
+// Find family by ID
+function getFamilyById(id) {
+    return families.find(f => f.id === id);
+}
+
 function update() {
-    slowmo = keys[' '] && robot.isJumping;
-    slowmoFactor = slowmo ? 0.25 : 1;
+    if (game.gameOver) return;
+
+    // Hold space for fast mode
+    slowmoFactor = keys[' '] ? 1 : 0.35;
     const dt = slowmoFactor;
 
-    // Movement
-    if (keys['ArrowLeft']) {
-        robot.velocityX = -robot.speed;
-    } else if (keys['ArrowRight']) {
-        robot.velocityX = robot.speed;
-    } else {
-        robot.velocityX *= robot.friction;
-    }
+    // Player movement - immediate stop, no sliding
+    player.vx = 0;
+    player.vy = 0;
+    if (keys['ArrowLeft']) player.vx = -player.speed;
+    if (keys['ArrowRight']) player.vx = player.speed;
+    if (keys['ArrowUp']) player.vy = -player.speed;
+    if (keys['ArrowDown']) player.vy = player.speed;
 
-    // Jump from ground
-    if (keys['ArrowUp'] && !robot.isJumping) {
-        robot.velocityY = robot.jumpForce;
-        robot.isJumping = true;
-        robot.combo = 0;
-    }
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
 
-    // Air control
-    if (robot.isJumping) {
-        if (keys['ArrowUp']) {
-            robot.velocityY = -robot.speed * 0.5;
-        } else if (keys['ArrowDown']) {
-            robot.velocityY = robot.speed * 0.5;
-        } else {
-            robot.velocityY += robot.gravity * dt;
+    // Clamp to screen edges
+    if (player.x < player.radius) { player.x = player.radius; player.vx = 0; }
+    if (player.x > canvas.width - player.radius) { player.x = canvas.width - player.radius; player.vx = 0; }
+    if (player.y < player.radius) { player.y = player.radius; player.vy = 0; }
+    if (player.y > canvas.height - player.radius) { player.y = canvas.height - player.radius; player.vy = 0; }
+
+    // Update invulnerability
+    if (player.invulnerable > 0) player.invulnerable -= dt;
+
+    // Update vulnerability timer
+    if (vulnerability.familyId !== null) {
+        vulnerability.timer -= dt;
+        if (vulnerability.timer <= 0) {
+            // Time's up - reset the vulnerable family
+            const family = getFamilyById(vulnerability.familyId);
+            if (family) {
+                for (const member of family.members) {
+                    if (member.hit && member.alive) {
+                        member.hit = false;
+                        member.opacity = 1;
+                    }
+                }
+            }
+            vulnerability.familyId = null;
         }
-    } else {
-        robot.velocityY += robot.gravity * dt;
-    }
-
-    robot.y += robot.velocityY * dt;
-
-    if (robot.comboTimer > 0) robot.comboTimer -= dt;
-
-    if (robot.y >= GROUND_Y) {
-        robot.y = GROUND_Y;
-        robot.velocityY = 0;
-        if (robot.isJumping && robot.combo > 1) {
-            robot.comboTimer = 120;
-        }
-        robot.isJumping = false;
-    }
-
-    // World scroll at edges
-    const LEFT_EDGE = 150;
-    const RIGHT_EDGE = canvas.width - 150;
-    robot.x += robot.velocityX * dt;
-
-    if (robot.x < LEFT_EDGE) {
-        worldScroll += robot.x - LEFT_EDGE;
-        robot.x = LEFT_EDGE;
-    } else if (robot.x > RIGHT_EDGE) {
-        worldScroll += robot.x - RIGHT_EDGE;
-        robot.x = RIGHT_EDGE;
     }
 
     // Update targets
-    for (let i = 0; i < targets.length; i++) {
-        targets[i].x = targets[i].worldX - worldScroll;
-        targets[i].y = targets[i].baseY;
+    for (const family of families) {
+        for (const target of family.members) {
+            if (!target.alive) continue;
+
+            // Random direction changes
+            if (Math.random() < 0.02) {
+                target.vx += (Math.random() - 0.5) * 0.3;
+                target.vy += (Math.random() - 0.5) * 0.3;
+            }
+
+            // Limit speed
+            const speed = Math.sqrt(target.vx * target.vx + target.vy * target.vy);
+            if (speed > 1) {
+                target.vx = (target.vx / speed) * 1;
+                target.vy = (target.vy / speed) * 1;
+            }
+
+            target.x += target.vx * dt;
+            target.y += target.vy * dt;
+
+            // Bounce off edges
+            if (target.x < target.radius) { target.x = target.radius; target.vx *= -1; }
+            if (target.x > canvas.width - target.radius) { target.x = canvas.width - target.radius; target.vx *= -1; }
+            if (target.y < target.radius) { target.y = target.radius; target.vy *= -1; }
+            if (target.y > canvas.height - target.radius) { target.y = canvas.height - target.radius; target.vy *= -1; }
+        }
     }
 
-    robot.wheelRotation += robot.velocityX * 0.15;
-    updateAttack();
+    // Spawning
+    game.spawnTimer += dt;
+    const spawnInterval = Math.max(60, game.baseSpawnInterval - (game.level - 1) * 30);
+    if (game.spawnTimer >= spawnInterval) {
+        game.spawnTimer = 0;
+        spawnFamily();
+    }
+
+    // Level up based on score
+    const newLevel = Math.floor(game.score / 10) + 1;
+    if (newLevel > game.level) {
+        game.level = newLevel;
+        // Clear all families and respawn with base amount + (level - 1)
+        families.splice(0, families.length); // Clear array
+        vulnerability.familyId = null;
+        vulnerability.timer = 0;
+        game.spawnTimer = 0; // Reset spawn timer
+        const startingFamilies = 3 + (game.level - 1); // Level 2 = 4, Level 3 = 5, etc.
+        for (let i = 0; i < startingFamilies; i++) {
+            spawnFamily();
+        }
+    }
+
+    updateAttack(dt);
     checkTargetCollisions();
+    checkPlayerCollisions();
 
-    robot.screenShake.x *= 0.8;
-    robot.screenShake.y *= 0.8;
+    // Update screen shake
+    player.screenShake.x *= 0.8;
+    player.screenShake.y *= 0.8;
 
-    // Afterimages
-    if (Math.abs(robot.velocityX) > 2 && Math.random() > 0.6) {
-        robot.afterimages.push({
-            x: robot.x,
-            y: robot.y,
-            alpha: 0.4,
-            wheelRotation: robot.wheelRotation,
-            armAngle: robot.armAngle,
-            armExtension: robot.armExtension,
-            bladeExtension: robot.bladeExtension
-        });
-    }
-
-    robot.afterimages = robot.afterimages.filter(img => {
-        img.alpha -= 0.08;
-        return img.alpha > 0;
-    });
-
-    robot.strikeTrail = robot.strikeTrail.filter(p => {
-        p.alpha -= 0.15;
+    // Update strike trail
+    player.strikeTrail = player.strikeTrail.filter(p => {
+        p.alpha -= 0.15 * dt;
         return p.alpha > 0;
     });
 
@@ -269,401 +339,452 @@ function update() {
         const p = hitParticles[i];
         p.x += p.vx * dt;
         p.y += p.vy * dt;
-        p.vy += 0.15 * dt;
         p.alpha -= 0.03 * dt;
         if (p.alpha <= 0) hitParticles.splice(i, 1);
+    }
+
+    // Clean up dead families
+    for (let i = families.length - 1; i >= 0; i--) {
+        if (families[i].members.every(m => !m.alive)) {
+            families.splice(i, 1);
+        }
+    }
+}
+
+function checkPlayerCollisions() {
+    if (player.invulnerable > 0) return;
+
+    for (const family of families) {
+        for (const target of family.members) {
+            if (!target.alive) continue;
+
+            // Check collision
+            const dx = player.x - target.x;
+            const dy = player.y - target.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < player.radius + target.radius) {
+                // Hit!
+                game.lives--;
+                player.invulnerable = 120; // 2 seconds of invulnerability
+                player.screenShake.x = (Math.random() - 0.5) * 15;
+                player.screenShake.y = (Math.random() - 0.5) * 15;
+
+                if (game.lives <= 0) {
+                    game.gameOver = true;
+                }
+                return;
+            }
+        }
     }
 }
 
 function checkTargetCollisions() {
-    if (robot.bladeExtension < 0.3 || robot.armExtension < 0.3) return;
+    if (player.bladeExtension < 0.3 || player.armExtension < 0.3) return;
 
-    const wheelRadius = 10;
-    const armLength = 12 * robot.armExtension;
-    const bladeLength = 60 * robot.bladeExtension;
-    const pivotX = robot.x;
-    const pivotY = robot.y - wheelRadius - 2;
+    const armLength = 15 * player.armExtension;
+    const bladeLength = 70 * player.bladeExtension;
+    const pivotX = player.x;
+    const pivotY = player.y;
 
-    const armEndX = pivotX + Math.cos(robot.armAngle) * armLength;
-    const armEndY = pivotY + Math.sin(robot.armAngle) * armLength;
-    const bladeTipX = armEndX + Math.cos(robot.armAngle + robot.bladeAngle) * bladeLength;
-    const bladeTipY = armEndY + Math.sin(robot.armAngle + robot.bladeAngle) * bladeLength;
+    const armEndX = pivotX + Math.cos(player.armAngle) * armLength;
+    const armEndY = pivotY + Math.sin(player.armAngle) * armLength;
+    const bladeTipX = armEndX + Math.cos(player.armAngle + player.bladeAngle) * bladeLength;
+    const bladeTipY = armEndY + Math.sin(player.armAngle + player.bladeAngle) * bladeLength;
 
-    for (let i = 0; i < targets.length; i++) {
-        const target = targets[i];
-        if (!target.alive) continue;
+    // Collect all hits this frame
+    const hits = [];
 
-        const dx = bladeTipX - armEndX;
-        const dy = bladeTipY - armEndY;
-        const fx = armEndX - target.x;
-        const fy = armEndY - target.y;
+    for (const family of families) {
+        for (const target of family.members) {
+            if (!target.alive || target.hit) continue;
 
-        const a = dx * dx + dy * dy;
-        const b = 2 * (fx * dx + fy * dy);
-        const c = fx * fx + fy * fy - target.radius * target.radius;
+            // Line-circle intersection (simplified, no wraparound for blade)
+            const dx = bladeTipX - armEndX;
+            const dy = bladeTipY - armEndY;
+            const fx = armEndX - target.x;
+            const fy = armEndY - target.y;
 
-        let discriminant = b * b - 4 * a * c;
-        if (discriminant >= 0) {
-            discriminant = Math.sqrt(discriminant);
-            const t1 = (-b - discriminant) / (2 * a);
-            const t2 = (-b + discriminant) / (2 * a);
+            const a = dx * dx + dy * dy;
+            const b = 2 * (fx * dx + fy * dy);
+            const c = fx * fx + fy * fy - target.radius * target.radius;
 
-            if ((t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1)) {
-                target.alive = false;
-                robot.screenShake.x = (Math.random() - 0.5) * 6;
-                robot.screenShake.y = (Math.random() - 0.5) * 6;
+            let discriminant = b * b - 4 * a * c;
+            if (discriminant >= 0) {
+                discriminant = Math.sqrt(discriminant);
+                const t1 = (-b - discriminant) / (2 * a);
+                const t2 = (-b + discriminant) / (2 * a);
 
-                // Minimal hit particles - just a few white dots
-                for (let p = 0; p < 4; p++) {
-                    const angle = (p / 4) * Math.PI * 2 + Math.random() * 0.5;
-                    const speed = 1.5 + Math.random() * 2;
-                    hitParticles.push({
-                        x: target.x,
-                        y: target.y,
-                        vx: Math.cos(angle) * speed,
-                        vy: Math.sin(angle) * speed - 1.5,
-                        alpha: 1
-                    });
-                }
-
-                if (robot.isJumping) {
-                    robot.combo++;
-                    if (robot.combo > robot.bestCombo) {
-                        robot.bestCombo = robot.combo;
-                    }
+                if ((t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1)) {
+                    hits.push({ target, family });
                 }
             }
         }
     }
+
+    if (hits.length === 0) return;
+
+    // Process hits - favor the player
+    // Separate into: singletons, already-vulnerable family members, other
+    const singletons = hits.filter(h => h.family.members.length === 1);
+    const vulnerableHits = hits.filter(h =>
+        h.family.id === vulnerability.familyId && h.family.members.length > 1
+    );
+    const otherHits = hits.filter(h =>
+        h.family.id !== vulnerability.familyId && h.family.members.length > 1
+    );
+
+    // Kill all singletons
+    for (const { target, family } of singletons) {
+        killTarget(target, family);
+    }
+
+    // Kill vulnerable family members
+    for (const { target, family } of vulnerableHits) {
+        hitFamilyMember(target, family);
+    }
+
+    // For others: if no vulnerable family, make the first one vulnerable
+    // If there's already a vulnerable family, ignore (favor player)
+    if (otherHits.length > 0 && vulnerability.familyId === null) {
+        const { target, family } = otherHits[0];
+        // Make this family vulnerable
+        vulnerability.familyId = family.id;
+        vulnerability.timer = vulnerability.duration;
+        hitFamilyMember(target, family);
+    } else if (otherHits.length > 0 && vulnerability.familyId !== null) {
+        // Wrong family hit while another is vulnerable
+        // Reset the old family and make this one vulnerable
+        const oldFamily = getFamilyById(vulnerability.familyId);
+        if (oldFamily) {
+            for (const member of oldFamily.members) {
+                if (member.hit && member.alive) {
+                    member.hit = false;
+                    member.opacity = 1;
+                }
+            }
+        }
+
+        const { target, family } = otherHits[0];
+        vulnerability.familyId = family.id;
+        vulnerability.timer = vulnerability.duration;
+        hitFamilyMember(target, family);
+    }
 }
 
-function updateAttack() {
+function hitFamilyMember(target, family) {
+    target.hit = true;
+    target.opacity = 0.3;
+
+    // Create particles
+    createHitParticles(target.x, target.y);
+
+    // Check if all family members are hit
+    const allHit = family.members.every(m => m.hit || !m.alive);
+    if (allHit) {
+        // Eliminate the family!
+        for (const member of family.members) {
+            if (member.alive) {
+                killTarget(member, family);
+            }
+        }
+        vulnerability.familyId = null;
+    }
+
+    player.screenShake.x = (Math.random() - 0.5) * 4;
+    player.screenShake.y = (Math.random() - 0.5) * 4;
+}
+
+function killTarget(target, family) {
+    target.alive = false;
+    game.score++;
+    createHitParticles(target.x, target.y);
+
+    player.screenShake.x = (Math.random() - 0.5) * 6;
+    player.screenShake.y = (Math.random() - 0.5) * 6;
+}
+
+function createHitParticles(x, y) {
+    for (let p = 0; p < 6; p++) {
+        const angle = (p / 6) * Math.PI * 2 + Math.random() * 0.5;
+        const speed = 2 + Math.random() * 3;
+        hitParticles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            alpha: 1
+        });
+    }
+}
+
+function updateAttack(dt) {
     const easeOutQuart = (t) => 1 - Math.pow(1 - t, 4);
     const easeOutQuint = (t) => 1 - Math.pow(1 - t, 5);
     const easeInOut = (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
-    const isJab = robot.attackState.startsWith('jab-');
-    const isSwing = robot.attackState.startsWith('swing-');
+    const isJab = player.attackState.startsWith('jab-');
+    const isSwing = player.attackState === 'swing';
+
+    // Attack speed affected by slowmo
+    const attackSpeed = dt;
 
     if (isJab) {
-        const direction = robot.attackState.replace('jab-', '');
-        const held = robot.attackHeld === direction;
+        const direction = player.attackState.replace('jab-', '');
+        const held = player.attackHeld === direction;
 
-        if (robot.attackProgress < 1) {
-            robot.attackProgress += 0.12;
-            if (robot.attackProgress > 1) robot.attackProgress = 1;
+        if (player.attackProgress < 1) {
+            player.attackProgress += 0.24 * attackSpeed;
+            if (player.attackProgress > 1) player.attackProgress = 1;
         }
 
-        const p = robot.attackProgress;
-
-        if (direction === 'up') robot.armAngle = -Math.PI / 2;
-        else if (direction === 'down') robot.armAngle = Math.PI / 2;
-        else if (direction === 'left') robot.armAngle = -Math.PI;
-        else robot.armAngle = 0;
+        const p = player.attackProgress;
+        player.armAngle = DIRECTION_ANGLES[direction];
 
         if (held) {
-            robot.armExtension = easeOutQuint(Math.min(p / 0.2, 1));
+            player.armExtension = easeOutQuint(Math.min(p / 0.2, 1));
             const bladeP = Math.max(0, (p - 0.1) / 0.4);
-            robot.bladeExtension = easeOutQuart(Math.min(bladeP, 1)) * 1.8;
+            player.bladeExtension = easeOutQuart(Math.min(bladeP, 1)) * 1.5;
         } else {
             if (p < 0.2) {
-                robot.armExtension = easeOutQuint(p / 0.2);
-                robot.bladeExtension = 0;
+                player.armExtension = easeOutQuint(p / 0.2);
+                player.bladeExtension = 0;
             } else if (p < 0.5) {
-                robot.armExtension = 1;
+                player.armExtension = 1;
                 const bladeP = (p - 0.2) / 0.3;
-                robot.bladeExtension = easeOutQuart(bladeP) * 1.8;
+                player.bladeExtension = easeOutQuart(bladeP) * 1.5;
             } else {
                 const retractP = (p - 0.5) / 0.5;
-                robot.bladeExtension = 1.8 * (1 - easeOutQuart(Math.min(retractP * 1.5, 1)));
-                robot.armExtension = 1 - easeOutQuart(Math.max(0, (retractP - 0.3) / 0.7));
-                if (robot.armExtension < 0.01 && robot.bladeExtension < 0.01) {
-                    robot.attackState = 'idle';
-                    robot.armExtension = 0;
-                    robot.bladeExtension = 0;
+                player.bladeExtension = 1.5 * (1 - easeOutQuart(Math.min(retractP * 1.5, 1)));
+                player.armExtension = 1 - easeOutQuart(Math.max(0, (retractP - 0.3) / 0.7));
+                if (player.armExtension < 0.01 && player.bladeExtension < 0.01) {
+                    player.attackState = 'idle';
+                    player.armExtension = 0;
+                    player.bladeExtension = 0;
                 }
             }
         }
-        robot.bladeAngle = 0;
+        player.bladeAngle = 0;
 
-        if (robot.bladeExtension > 0.3 && robot.attackProgress < 0.5) {
+        if (player.bladeExtension > 0.3 && player.attackProgress < 0.5) {
             addTrailPoint();
         }
 
     } else if (isSwing) {
-        robot.attackProgress += 0.08;
+        player.attackProgress += 0.16 * attackSpeed;
 
-        if (robot.attackProgress >= 1) {
-            robot.attackState = 'idle';
-            robot.attackProgress = 0;
-            robot.armExtension = 0;
-            robot.bladeExtension = 0;
+        if (player.attackProgress >= 1) {
+            player.attackState = 'idle';
+            player.attackProgress = 0;
+            player.armExtension = 0;
+            player.bladeExtension = 0;
         } else {
-            const p = robot.attackProgress;
-            const swingType = robot.attackState.replace('swing-', '');
+            const p = player.attackProgress;
 
-            robot.armExtension = 1;
-            robot.bladeExtension = 1.3;
+            player.armExtension = 1;
+            player.bladeExtension = 1.2;
 
-            if (swingType === 'lr') {
-                robot.armAngle = -Math.PI - 0.2 + easeInOut(p) * (Math.PI + 0.4);
-            } else if (swingType === 'rl') {
-                robot.armAngle = 0.2 - easeInOut(p) * (Math.PI + 0.4);
-            } else if (swingType === 'ud') {
-                robot.armAngle = -Math.PI / 2 - 0.2 + easeInOut(p) * (Math.PI + 0.4);
-            } else if (swingType === 'du') {
-                robot.armAngle = Math.PI / 2 + 0.2 - easeInOut(p) * (Math.PI + 0.4);
+            // Calculate swing arc
+            let startAngle = player.swingStartAngle;
+            let endAngle = player.swingEndAngle;
+
+            // Determine arc length
+            let diff = endAngle - startAngle;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+
+            let arcLength;
+            if (player.swingDirection === 1) {
+                // Clockwise - positive direction
+                arcLength = diff > 0 ? diff : (Math.PI * 2 + diff);
             } else {
-                robot.armAngle = -Math.PI * 0.75 + easeInOut(p) * Math.PI * 1.5;
+                // Counter-clockwise - negative direction
+                arcLength = diff < 0 ? diff : (diff - Math.PI * 2);
             }
 
-            robot.bladeAngle = Math.sin(p * Math.PI) * 0.15;
+            player.armAngle = startAngle + easeInOut(p) * arcLength;
+            player.bladeAngle = Math.sin(p * Math.PI) * 0.15;
 
-            if (p > 0.3 && p < 0.7) {
-                robot.screenShake.x = (Math.random() - 0.5) * 4;
-                robot.screenShake.y = (Math.random() - 0.5) * 2;
+            if (p > 0.2 && p < 0.8) {
+                player.screenShake.x = (Math.random() - 0.5) * 3;
+                player.screenShake.y = (Math.random() - 0.5) * 2;
             }
         }
         addTrailPoint();
 
     } else {
-        robot.armAngle += (-Math.PI/2 - robot.armAngle) * 0.15;
-        robot.bladeAngle *= 0.8;
-        robot.bladeExtension *= 0.85;
-        robot.armExtension *= 0.85;
-        if (robot.bladeExtension < 0.01) robot.bladeExtension = 0;
-        if (robot.armExtension < 0.01) robot.armExtension = 0;
+        player.armAngle += (-Math.PI/2 - player.armAngle) * 0.15;
+        player.bladeAngle *= 0.8;
+        player.bladeExtension *= 0.85;
+        player.armExtension *= 0.85;
+        if (player.bladeExtension < 0.01) player.bladeExtension = 0;
+        if (player.armExtension < 0.01) player.armExtension = 0;
     }
 }
 
 function addTrailPoint() {
-    if (robot.bladeExtension > 0.3 && robot.armExtension > 0.3) {
-        const wheelRadius = 10;
-        const armLength = 12 * robot.armExtension;
-        const bladeLength = 60 * robot.bladeExtension;
-        const pivotX = robot.x;
-        const pivotY = robot.y - wheelRadius - 2;
+    if (player.bladeExtension > 0.3 && player.armExtension > 0.3) {
+        const armLength = 15 * player.armExtension;
+        const bladeLength = 70 * player.bladeExtension;
+        const pivotX = player.x;
+        const pivotY = player.y;
 
-        const armEndX = pivotX + Math.cos(robot.armAngle) * armLength;
-        const armEndY = pivotY + Math.sin(robot.armAngle) * armLength;
-        const bladeTipX = armEndX + Math.cos(robot.armAngle + robot.bladeAngle) * bladeLength;
-        const bladeTipY = armEndY + Math.sin(robot.armAngle + robot.bladeAngle) * bladeLength;
+        const armEndX = pivotX + Math.cos(player.armAngle) * armLength;
+        const armEndY = pivotY + Math.sin(player.armAngle) * armLength;
+        const bladeTipX = armEndX + Math.cos(player.armAngle + player.bladeAngle) * bladeLength;
+        const bladeTipY = armEndY + Math.sin(player.armAngle + player.bladeAngle) * bladeLength;
 
-        robot.strikeTrail.push({ x: bladeTipX, y: bladeTipY, alpha: 1 });
+        player.strikeTrail.push({ x: bladeTipX, y: bladeTipY, alpha: 1 });
     }
-}
-
-// Cache static background
-function initBackground() {
-    // Solid dark background
-    bgCtx.fillStyle = COLORS.bg;
-    bgCtx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Moon outline
-    bgCtx.strokeStyle = COLORS.dim;
-    bgCtx.lineWidth = 1;
-    bgCtx.beginPath();
-    bgCtx.arc(780, 70, 30, 0, Math.PI * 2);
-    bgCtx.stroke();
-
-    // Distant mountains - wireframe outline
-    bgCtx.strokeStyle = COLORS.line;
-    bgCtx.lineWidth = 1;
-    bgCtx.beginPath();
-    bgCtx.moveTo(0, GROUND_Y - 60);
-    bgCtx.lineTo(120, GROUND_Y - 160);
-    bgCtx.lineTo(240, GROUND_Y - 80);
-    bgCtx.lineTo(360, GROUND_Y - 200);
-    bgCtx.lineTo(480, GROUND_Y - 100);
-    bgCtx.lineTo(600, GROUND_Y - 180);
-    bgCtx.lineTo(720, GROUND_Y - 90);
-    bgCtx.lineTo(840, GROUND_Y - 150);
-    bgCtx.lineTo(900, GROUND_Y - 70);
-    bgCtx.stroke();
-
-    // Closer mountain range - slightly brighter
-    bgCtx.strokeStyle = COLORS.dim;
-    bgCtx.beginPath();
-    bgCtx.moveTo(0, GROUND_Y - 30);
-    bgCtx.lineTo(80, GROUND_Y - 100);
-    bgCtx.lineTo(180, GROUND_Y - 50);
-    bgCtx.lineTo(300, GROUND_Y - 130);
-    bgCtx.lineTo(420, GROUND_Y - 70);
-    bgCtx.lineTo(540, GROUND_Y - 110);
-    bgCtx.lineTo(660, GROUND_Y - 60);
-    bgCtx.lineTo(780, GROUND_Y - 95);
-    bgCtx.lineTo(900, GROUND_Y - 45);
-    bgCtx.stroke();
 }
 
 function draw() {
     ctx.save();
-    ctx.translate(robot.screenShake.x | 0, robot.screenShake.y | 0);
+    ctx.translate(player.screenShake.x | 0, player.screenShake.y | 0);
 
-    // Draw cached background
-    ctx.drawImage(bgCanvas, 0, 0);
+    // Background
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Silhouettes (foreground trees)
-    drawSilhouettes();
-
-    // Ground with grid
-    drawGround();
-
-    // Targets
+    // Draw targets
     drawTargets();
 
     // Hit particles
     drawHitParticles();
 
-    // Afterimages
-    drawAfterimages();
-
     // Strike trail
     drawStrikeTrail();
 
-    // Robot
-    drawRobot(robot.x | 0, robot.y | 0, 1, robot.armAngle, robot.bladeAngle, robot.wheelRotation, robot.bladeExtension, false, robot.armExtension);
-
-    // Slowmo indicator - thin radial lines
-    if (slowmo) {
-        ctx.strokeStyle = COLORS.line;
-        ctx.lineWidth = 1;
-        const rx = robot.x | 0;
-        const ry = (robot.y - 10) | 0;
-        for (let i = 0; i < 8; i++) {
-            const angle = (i / 8) * Math.PI * 2;
-            ctx.beginPath();
-            ctx.moveTo(rx + Math.cos(angle) * 30, ry + Math.sin(angle) * 30);
-            ctx.lineTo(rx + Math.cos(angle) * 150, ry + Math.sin(angle) * 150);
-            ctx.stroke();
-        }
-    }
-
-    // Combo display - minimal
-    if (robot.combo > 1 && robot.isJumping) {
-        ctx.fillStyle = COLORS.bright;
-        ctx.font = '24px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${robot.combo}x`, canvas.width / 2, 70);
-        ctx.restore();
-    } else if (robot.comboTimer > 0 && robot.combo > 1) {
-        ctx.globalAlpha = robot.comboTimer / 120;
-        ctx.fillStyle = COLORS.bright;
-        ctx.font = '24px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${robot.combo}x`, canvas.width / 2, 70);
-        ctx.textAlign = 'left';
-        ctx.globalAlpha = 1;
-    }
+    // Player
+    drawPlayer();
 
     drawUI();
     ctx.restore();
-}
 
-function drawSilhouettes() {
-    ctx.strokeStyle = COLORS.dim;
-    ctx.lineWidth = 1;
-    const baseY = GROUND_Y + 10;
-
-    for (let i = 0; i < silhouettes.length; i++) {
-        const s = silhouettes[i];
-        let screenX = s.worldX - (worldScroll * 1.2);
-        screenX = ((screenX % 2500) + 2500) % 2500 - 400;
-
-        if (screenX < -100 || screenX > 1000) continue;
-
-        // Wireframe triangle
-        ctx.beginPath();
-        ctx.moveTo(screenX | 0, (baseY - s.height) | 0);
-        ctx.lineTo((screenX - s.width) | 0, baseY);
-        ctx.lineTo((screenX + s.width) | 0, baseY);
-        ctx.closePath();
-        ctx.stroke();
+    // Game over screen
+    if (game.gameOver) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = COLORS.bright;
+        ctx.font = '48px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 30);
+        ctx.font = '24px monospace';
+        ctx.fillText(`Score: ${game.score}`, canvas.width / 2, canvas.height / 2 + 20);
+        ctx.font = '16px monospace';
+        ctx.fillText('Refresh to restart', canvas.width / 2, canvas.height / 2 + 60);
+        ctx.textAlign = 'left';
     }
-}
-
-let groundScrollPos = 0;
-
-function drawGround() {
-    // Main ground line
-    ctx.strokeStyle = COLORS.bright;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, GROUND_Y + 10);
-    ctx.lineTo(canvas.width, GROUND_Y + 10);
-    ctx.stroke();
-
-    // Grid markers
-    ctx.strokeStyle = COLORS.line;
-    groundScrollPos = ((groundScrollPos - robot.velocityX * 0.5) % 40 + 40) % 40;
-
-    for (let x = groundScrollPos | 0; x < canvas.width; x += 40) {
-        // Vertical tick
-        ctx.beginPath();
-        ctx.moveTo(x, GROUND_Y + 10);
-        ctx.lineTo(x, GROUND_Y + 18);
-        ctx.stroke();
-    }
-
-    // Subtle perspective grid lines extending up
-    ctx.globalAlpha = 0.15;
-    for (let x = groundScrollPos | 0; x < canvas.width; x += 80) {
-        ctx.beginPath();
-        ctx.moveTo(x, GROUND_Y + 10);
-        ctx.lineTo(canvas.width / 2, 50);
-        ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
 }
 
 function drawTargets() {
-    ctx.strokeStyle = COLORS.bright;
-    ctx.lineWidth = 1;
+    for (const family of families) {
+        const isVulnerable = family.id === vulnerability.familyId;
+        const blinkOn = isVulnerable && Math.floor(Date.now() / 100) % 2 === 0;
 
-    for (let i = 0; i < targets.length; i++) {
-        const t = targets[i];
-        if (!t.alive || t.x < -50 || t.x > 950) continue;
+        for (const target of family.members) {
+            if (!target.alive) continue;
 
-        const x = t.x | 0;
-        const y = t.y | 0;
+            ctx.globalAlpha = target.opacity;
 
-        // Simple circle outline
-        ctx.beginPath();
-        ctx.arc(x, y, t.radius, 0, Math.PI * 2);
-        ctx.stroke();
+            // Color based on vulnerability state
+            let color = family.color;
+            if (isVulnerable && blinkOn) {
+                color = COLORS.vulnerable;
+            }
 
-        // Small center dot
-        ctx.fillStyle = COLORS.bright;
-        ctx.beginPath();
-        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
-        ctx.fill();
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = 2;
+
+            drawShape(target.x, target.y, target.radius, family.shape);
+
+            ctx.globalAlpha = 1;
+        }
     }
+}
+
+function drawShape(x, y, radius, shape) {
+    ctx.beginPath();
+
+    switch (shape) {
+        case 'triangle':
+            for (let i = 0; i < 3; i++) {
+                const angle = (i / 3) * Math.PI * 2 - Math.PI / 2;
+                const px = x + Math.cos(angle) * radius;
+                const py = y + Math.sin(angle) * radius;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            break;
+
+        case 'square':
+            ctx.rect(x - radius * 0.7, y - radius * 0.7, radius * 1.4, radius * 1.4);
+            break;
+
+        case 'diamond':
+            ctx.moveTo(x, y - radius);
+            ctx.lineTo(x + radius * 0.7, y);
+            ctx.lineTo(x, y + radius);
+            ctx.lineTo(x - radius * 0.7, y);
+            ctx.closePath();
+            break;
+
+        case 'pentagon':
+            for (let i = 0; i < 5; i++) {
+                const angle = (i / 5) * Math.PI * 2 - Math.PI / 2;
+                const px = x + Math.cos(angle) * radius;
+                const py = y + Math.sin(angle) * radius;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            break;
+
+        case 'hexagon':
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                const px = x + Math.cos(angle) * radius;
+                const py = y + Math.sin(angle) * radius;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            break;
+
+        case 'star':
+            for (let i = 0; i < 10; i++) {
+                const angle = (i / 10) * Math.PI * 2 - Math.PI / 2;
+                const r = i % 2 === 0 ? radius : radius * 0.5;
+                const px = x + Math.cos(angle) * r;
+                const py = y + Math.sin(angle) * r;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            break;
+    }
+
+    ctx.stroke();
 }
 
 function drawHitParticles() {
     ctx.fillStyle = COLORS.bright;
-    for (let i = 0; i < hitParticles.length; i++) {
-        const p = hitParticles[i];
+    for (const p of hitParticles) {
         ctx.globalAlpha = p.alpha;
-        ctx.fillRect((p.x - 1) | 0, (p.y - 1) | 0, 2, 2);
+        ctx.fillRect((p.x - 2) | 0, (p.y - 2) | 0, 4, 4);
     }
     ctx.globalAlpha = 1;
 }
 
-function drawAfterimages() {
-    for (let i = 0; i < robot.afterimages.length; i++) {
-        const img = robot.afterimages[i];
-        drawRobot(img.x | 0, img.y | 0, img.alpha * 0.5, img.armAngle, 0, img.wheelRotation, img.bladeExtension, true, img.armExtension);
-    }
-}
-
 function drawStrikeTrail() {
-    if (robot.strikeTrail.length < 2) return;
+    if (player.strikeTrail.length < 2) return;
 
-    ctx.lineWidth = 1;
-    for (let i = 1; i < robot.strikeTrail.length; i++) {
-        const p1 = robot.strikeTrail[i - 1];
-        const p2 = robot.strikeTrail[i];
+    ctx.lineWidth = 2;
+    for (let i = 1; i < player.strikeTrail.length; i++) {
+        const p1 = player.strikeTrail[i - 1];
+        const p2 = player.strikeTrail[i];
         ctx.strokeStyle = `rgba(255, 255, 255, ${p2.alpha})`;
         ctx.beginPath();
         ctx.moveTo(p1.x | 0, p1.y | 0);
@@ -672,45 +793,42 @@ function drawStrikeTrail() {
     }
 }
 
-function drawRobot(x, y, alpha = 1, armAng = -Math.PI/2, bladeAng = 0, wheelRot = 0, bladeExt = 0, isAfterimage = false, armExt = null) {
-    ctx.globalAlpha = alpha;
+function drawPlayer() {
+    // Blinking when invulnerable
+    if (player.invulnerable > 0 && Math.floor(Date.now() / 80) % 2 === 0) {
+        return;
+    }
 
-    const armExtension = armExt !== null ? armExt : robot.armExtension;
-    const wheelRadius = 10;
-    const wheelY = y + 1;
+    ctx.strokeStyle = COLORS.bright;
+    ctx.lineWidth = 2;
 
-    ctx.strokeStyle = isAfterimage ? COLORS.dim : COLORS.bright;
-    ctx.lineWidth = isAfterimage ? 1 : 1.5;
-
-    // Wheel
+    // Player body (circle)
     ctx.beginPath();
-    ctx.arc(x, wheelY, wheelRadius, 0, Math.PI * 2);
+    ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Arm and blade
-    if (armExtension > 0.01) {
-        const pivotX = x;
-        const pivotY = y - wheelRadius - 2;
+    // Center dot
+    ctx.fillStyle = COLORS.bright;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, 3, 0, Math.PI * 2);
+    ctx.fill();
 
-        // Pivot
-        ctx.beginPath();
-        ctx.arc(pivotX, pivotY, 2, 0, Math.PI * 2);
-        ctx.stroke();
+    // Arm and blade
+    if (player.armExtension > 0.01) {
+        const armLength = 15 * player.armExtension;
+        const armEndX = player.x + Math.cos(player.armAngle) * armLength;
+        const armEndY = player.y + Math.sin(player.armAngle) * armLength;
 
         // Arm
-        const armLength = 12 * armExtension;
-        const armEndX = pivotX + Math.cos(armAng) * armLength;
-        const armEndY = pivotY + Math.sin(armAng) * armLength;
-
         ctx.beginPath();
-        ctx.moveTo(pivotX, pivotY);
+        ctx.moveTo(player.x, player.y);
         ctx.lineTo(armEndX | 0, armEndY | 0);
         ctx.stroke();
 
         // Blade
-        if (bladeExt > 0.01) {
-            const bladeLength = 60 * bladeExt;
-            const totalBladeAngle = armAng + bladeAng;
+        if (player.bladeExtension > 0.01) {
+            const bladeLength = 70 * player.bladeExtension;
+            const totalBladeAngle = player.armAngle + player.bladeAngle;
             const bladeTipX = armEndX + Math.cos(totalBladeAngle) * bladeLength;
             const bladeTipY = armEndY + Math.sin(totalBladeAngle) * bladeLength;
 
@@ -720,25 +838,41 @@ function drawRobot(x, y, alpha = 1, armAng = -Math.PI/2, bladeAng = 0, wheelRot 
             ctx.stroke();
         }
     }
-
-    ctx.globalAlpha = 1;
 }
 
 function drawUI() {
     ctx.fillStyle = COLORS.line;
-    ctx.font = '11px monospace';
+    ctx.font = '14px monospace';
 
-    const alive = targets.filter(t => t.alive).length;
-    ctx.fillText(`${alive}/${targets.length}`, 20, 22);
+    // Lives
+    ctx.fillText(`Lives: ${game.lives}`, 20, 25);
 
-    if (robot.bestCombo > 1) {
-        ctx.fillText(`best: ${robot.bestCombo}x`, 20, 36);
+    // Score
+    ctx.fillText(`Score: ${game.score}`, 20, 45);
+
+    // Level
+    ctx.fillText(`Level: ${game.level}`, 20, 65);
+
+    // Vulnerability timer
+    if (vulnerability.familyId !== null) {
+        const family = getFamilyById(vulnerability.familyId);
+        if (family) {
+            const timeLeft = (vulnerability.timer / 60).toFixed(1);
+            const membersLeft = family.members.filter(m => m.alive && !m.hit).length;
+            const totalMembers = family.members.filter(m => m.alive || m.hit).length;
+
+            ctx.fillStyle = COLORS.vulnerable;
+            ctx.fillText(`${family.shape.toUpperCase()}: ${timeLeft}s (${membersLeft}/${totalMembers} left)`, canvas.width - 250, 25);
+        }
     }
 
-    if (slowmo) {
-        ctx.fillStyle = COLORS.bright;
-        ctx.fillText('SLOW', canvas.width - 50, 22);
+    // Active targets count
+    let aliveCount = 0;
+    for (const f of families) {
+        aliveCount += f.members.filter(m => m.alive).length;
     }
+    ctx.fillStyle = COLORS.line;
+    ctx.fillText(`Targets: ${aliveCount}`, canvas.width - 100, 65);
 }
 
 function gameLoop() {
@@ -747,6 +881,9 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
-// Initialize and start
-initBackground();
+// Initialize with some starting targets
+for (let i = 0; i < 3; i++) {
+    spawnFamily();
+}
+
 gameLoop();
