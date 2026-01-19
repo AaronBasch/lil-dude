@@ -207,15 +207,86 @@ function checkLevelComplete() {
     return true;
 }
 
+// Update visual elements (runs even on game over)
+function updateVisuals(dt) {
+    // Update targets movement
+    for (const family of families) {
+        for (const target of family.members) {
+            if (!target.alive) continue;
+
+            // Random direction changes
+            if (Math.random() < 0.02) {
+                target.vx += (Math.random() - 0.5) * 0.3;
+                target.vy += (Math.random() - 0.5) * 0.3;
+            }
+
+            // Limit speed
+            const speed = Math.sqrt(target.vx * target.vx + target.vy * target.vy);
+            if (speed > 1) {
+                target.vx = (target.vx / speed) * 1;
+                target.vy = (target.vy / speed) * 1;
+            }
+
+            target.x += target.vx * dt;
+            target.y += target.vy * dt;
+
+            // Bounce off edges
+            if (target.x < target.radius) { target.x = target.radius; target.vx *= -1; }
+            if (target.x > canvas.width - target.radius) { target.x = canvas.width - target.radius; target.vx *= -1; }
+            if (target.y < target.radius) { target.y = target.radius; target.vy *= -1; }
+            if (target.y > canvas.height - target.radius) { target.y = canvas.height - target.radius; target.vy *= -1; }
+        }
+    }
+
+    // Continuous spawning
+    game.spawnTimer += dt;
+    const spawnInterval = Math.max(
+        game.minSpawnInterval,
+        game.baseSpawnInterval - (game.level - 1) * 20
+    );
+    if (game.spawnTimer >= spawnInterval) {
+        game.spawnTimer = 0;
+        spawnFamily();
+    }
+
+    // Update hit particles
+    for (let i = hitParticles.length - 1; i >= 0; i--) {
+        const p = hitParticles[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.alpha -= 0.03 * dt;
+        if (p.alpha <= 0) hitParticles.splice(i, 1);
+    }
+
+    // Update target animations (spawn fade-in, death shrink)
+    updateTargetAnimations();
+
+    // Update screen shake decay
+    player.screenShake.x *= 0.8;
+    player.screenShake.y *= 0.8;
+
+    // Clean up dead families (only after death animations complete)
+    for (let i = families.length - 1; i >= 0; i--) {
+        if (families[i].members.every(m => !m.alive && !m.dying)) {
+            families.splice(i, 1);
+        }
+    }
+}
+
 function update() {
+    // Use slow time factor (fast mode only when not game over)
+    const dt = game.gameOver ? 0.35 : (keys[' '] ? 1 : 0.35);
+    slowmoFactor = dt;
+
+    // Always update visual elements (even on game over)
+    updateVisuals(dt);
+
     if (game.gameOver) return;
 
     // Handle freeze frames (brief pause on family elimination)
     if (freezeFrames > 0) {
         freezeFrames--;
-        // Still update visual effects during freeze
         bladeGlow *= 0.9;
-        updateTargetAnimations();
         return;
     }
 
@@ -227,10 +298,6 @@ function update() {
         }
         return;
     }
-
-    // Hold space for fast mode
-    slowmoFactor = keys[' '] ? 1 : 0.35;
-    const dt = slowmoFactor;
 
     // Decay blade glow
     bladeGlow *= 0.92;
@@ -273,46 +340,6 @@ function update() {
         }
     }
 
-    // Update targets
-    for (const family of families) {
-        for (const target of family.members) {
-            if (!target.alive) continue;
-
-            // Random direction changes
-            if (Math.random() < 0.02) {
-                target.vx += (Math.random() - 0.5) * 0.3;
-                target.vy += (Math.random() - 0.5) * 0.3;
-            }
-
-            // Limit speed
-            const speed = Math.sqrt(target.vx * target.vx + target.vy * target.vy);
-            if (speed > 1) {
-                target.vx = (target.vx / speed) * 1;
-                target.vy = (target.vy / speed) * 1;
-            }
-
-            target.x += target.vx * dt;
-            target.y += target.vy * dt;
-
-            // Bounce off edges
-            if (target.x < target.radius) { target.x = target.radius; target.vx *= -1; }
-            if (target.x > canvas.width - target.radius) { target.x = canvas.width - target.radius; target.vx *= -1; }
-            if (target.y < target.radius) { target.y = target.radius; target.vy *= -1; }
-            if (target.y > canvas.height - target.radius) { target.y = canvas.height - target.radius; target.vy *= -1; }
-        }
-    }
-
-    // Continuous spawning - interval decreases with level
-    game.spawnTimer += dt;
-    const spawnInterval = Math.max(
-        game.minSpawnInterval,
-        game.baseSpawnInterval - (game.level - 1) * 20
-    );
-    if (game.spawnTimer >= spawnInterval) {
-        game.spawnTimer = 0;
-        spawnFamily();
-    }
-
     // Check for level complete
     if (checkLevelComplete() && families.length > 0 || (families.length === 0 && game.level > 0)) {
         // Clean up any remaining dead families first
@@ -331,34 +358,11 @@ function update() {
     checkTargetCollisions();
     checkPlayerCollisions();
 
-    // Update screen shake
-    player.screenShake.x *= 0.8;
-    player.screenShake.y *= 0.8;
-
     // Update strike trail
     player.strikeTrail = player.strikeTrail.filter(p => {
         p.alpha -= 0.15 * dt;
         return p.alpha > 0;
     });
-
-    // Update hit particles
-    for (let i = hitParticles.length - 1; i >= 0; i--) {
-        const p = hitParticles[i];
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.alpha -= 0.03 * dt;
-        if (p.alpha <= 0) hitParticles.splice(i, 1);
-    }
-
-    // Update dying targets
-    updateTargetAnimations();
-
-    // Clean up dead families (only after death animations complete)
-    for (let i = families.length - 1; i >= 0; i--) {
-        if (families[i].members.every(m => !m.alive && !m.dying)) {
-            families.splice(i, 1);
-        }
-    }
 }
 
 function checkPlayerCollisions() {
