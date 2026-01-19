@@ -43,68 +43,70 @@ function startAudio() {
     bgMusic.play().catch(() => {});
 }
 
-// Synthesized sound effects
+// Synthesized sound effects (soft and gentle)
 function playSound(type) {
     if (!audioStarted) return;
 
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
+    osc.type = 'sine'; // Soft sine waves
     osc.connect(gain);
     gain.connect(audioCtx.destination);
 
     const now = audioCtx.currentTime;
 
     switch(type) {
-        case 'hit': // Quick blip when hitting a target
-            osc.frequency.setValueAtTime(880, now);
-            osc.frequency.exponentialRampToValueAtTime(440, now + 0.1);
-            gain.gain.setValueAtTime(0.15, now);
-            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        case 'hit': // Soft tap
+            osc.frequency.setValueAtTime(660, now);
+            osc.frequency.exponentialRampToValueAtTime(440, now + 0.08);
+            gain.gain.setValueAtTime(0.04, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
             osc.start(now);
-            osc.stop(now + 0.1);
+            osc.stop(now + 0.08);
             break;
 
-        case 'kill': // Satisfying sweep when family eliminated
-            osc.frequency.setValueAtTime(220, now);
-            osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
-            gain.gain.setValueAtTime(0.2, now);
-            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+        case 'kill': // Gentle chime
+            osc.frequency.setValueAtTime(330, now);
+            osc.frequency.exponentialRampToValueAtTime(660, now + 0.12);
+            gain.gain.setValueAtTime(0.05, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
             osc.start(now);
-            osc.stop(now + 0.2);
+            osc.stop(now + 0.15);
             break;
 
-        case 'hurt': // Low thud when player hit
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(150, now);
-            osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
-            gain.gain.setValueAtTime(0.25, now);
-            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+        case 'hurt': // Soft thump
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(120, now);
+            osc.frequency.exponentialRampToValueAtTime(60, now + 0.15);
+            gain.gain.setValueAtTime(0.06, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
             osc.start(now);
-            osc.stop(now + 0.25);
+            osc.stop(now + 0.15);
             break;
 
-        case 'levelup': // Ascending arpeggio
-            [440, 550, 660, 880].forEach((freq, i) => {
+        case 'levelup': // Soft ascending notes
+            [330, 440, 550, 660].forEach((freq, i) => {
                 const o = audioCtx.createOscillator();
                 const g = audioCtx.createGain();
+                o.type = 'sine';
                 o.connect(g);
                 g.connect(audioCtx.destination);
-                o.frequency.setValueAtTime(freq, now + i * 0.08);
-                g.gain.setValueAtTime(0.15, now + i * 0.08);
-                g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.08 + 0.15);
-                o.start(now + i * 0.08);
-                o.stop(now + i * 0.08 + 0.15);
+                o.frequency.setValueAtTime(freq, now + i * 0.1);
+                g.gain.setValueAtTime(0.03, now + i * 0.1);
+                g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.12);
+                o.start(now + i * 0.1);
+                o.stop(now + i * 0.1 + 0.12);
             });
-            return; // Early return since we created our own oscillators
+            return;
 
-        case 'gameover': // Descending tone
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(440, now);
-            osc.frequency.exponentialRampToValueAtTime(55, now + 0.8);
-            gain.gain.setValueAtTime(0.2, now);
-            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+        case 'gameover': // Gentle fade
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(330, now);
+            osc.frequency.exponentialRampToValueAtTime(110, now + 0.6);
+            gain.gain.setValueAtTime(0.05, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
             osc.start(now);
-            osc.stop(now + 0.8);
+            osc.stop(now + 0.6);
             break;
     }
 }
