@@ -1,5 +1,5 @@
 // Testing: change this to start at any level
-const DEBUG_START_LEVEL = 10;
+const DEBUG_START_LEVEL = 1;
 
 // Canvas setup
 const canvas = document.getElementById('game');
@@ -43,7 +43,10 @@ const game = {
     gameOver: false,
     familyIdCounter: 0,
     levelTransition: 0, // Countdown for level transition pause
-    levelTransitionDuration: 90 // ~1.5 seconds at 60fps
+    levelTransitionDuration: 90, // ~1.5 seconds at 60fps
+    spawnTimer: 0,
+    baseSpawnInterval: 300, // ~5 seconds at 60fps
+    minSpawnInterval: 120   // Minimum ~2 seconds at higher levels
 };
 
 // Vulnerability state - which family is currently vulnerable
@@ -160,7 +163,9 @@ function spawnFamily() {
             opacity: 1, // Goes transparent when hit but family not complete
             hit: false, // Has been hit during vulnerability window
             dying: false, // Death animation in progress
-            deathTimer: 0 // For shrink animation
+            deathTimer: 0, // For shrink animation
+            spawning: true, // Fade-in animation
+            spawnProgress: 0 // 0 to 1
         };
 
         // Clamp initial position
@@ -184,6 +189,7 @@ function startLevel(level) {
     families.splice(0, families.length);
     vulnerability.familyId = null;
     vulnerability.timer = 0;
+    game.spawnTimer = 0;
 
     const startingFamilies = 3 + (level - 1);
     for (let i = 0; i < startingFamilies; i++) {
@@ -209,7 +215,7 @@ function update() {
         freezeFrames--;
         // Still update visual effects during freeze
         bladeGlow *= 0.9;
-        updateDyingTargets();
+        updateTargetAnimations();
         return;
     }
 
@@ -296,7 +302,18 @@ function update() {
         }
     }
 
-    // Check for level complete (no more spawning during level)
+    // Continuous spawning - interval decreases with level
+    game.spawnTimer += dt;
+    const spawnInterval = Math.max(
+        game.minSpawnInterval,
+        game.baseSpawnInterval - (game.level - 1) * 20
+    );
+    if (game.spawnTimer >= spawnInterval) {
+        game.spawnTimer = 0;
+        spawnFamily();
+    }
+
+    // Check for level complete
     if (checkLevelComplete() && families.length > 0 || (families.length === 0 && game.level > 0)) {
         // Clean up any remaining dead families first
         for (let i = families.length - 1; i >= 0; i--) {
@@ -334,7 +351,7 @@ function update() {
     }
 
     // Update dying targets
-    updateDyingTargets();
+    updateTargetAnimations();
 
     // Clean up dead families (only after death animations complete)
     for (let i = families.length - 1; i >= 0; i--) {
@@ -349,7 +366,7 @@ function checkPlayerCollisions() {
 
     for (const family of families) {
         for (const target of family.members) {
-            if (!target.alive || target.hit) continue; // Skip dead or transparent (hit) targets
+            if (!target.alive || target.hit || target.spawning) continue; // Skip dead, hit, or spawning targets
 
             // Check collision
             const dx = player.x - target.x;
@@ -519,9 +536,18 @@ function createHitParticles(x, y, color = COLORS.bright, shape = null) {
     }
 }
 
-function updateDyingTargets() {
+function updateTargetAnimations() {
     for (const family of families) {
         for (const target of family.members) {
+            // Spawn fade-in
+            if (target.spawning) {
+                target.spawnProgress += 0.03;
+                if (target.spawnProgress >= 1) {
+                    target.spawnProgress = 1;
+                    target.spawning = false;
+                }
+            }
+            // Death shrink
             if (target.dying) {
                 target.deathTimer -= 0.08;
                 if (target.deathTimer <= 0) {
@@ -683,18 +709,22 @@ function drawTargets() {
                 color = COLORS.vulnerable;
             }
 
+            // Spawn fade-in factor
+            const spawnAlpha = target.spawning ? target.spawnProgress : 1;
+            const spawnScale = target.spawning ? 0.5 + target.spawnProgress * 0.5 : 1;
+
             // Draw diffused/bigger shape behind (aura effect)
-            ctx.globalAlpha = target.opacity * 0.15;
+            ctx.globalAlpha = target.opacity * 0.15 * spawnAlpha;
             ctx.strokeStyle = color;
             ctx.lineWidth = 1;
-            drawShape(target.x, target.y, target.radius * 1.8, family.shape);
+            drawShape(target.x, target.y, target.radius * 1.8 * spawnScale, family.shape);
 
             // Draw main shape
-            ctx.globalAlpha = target.opacity;
+            ctx.globalAlpha = target.opacity * spawnAlpha;
             ctx.strokeStyle = color;
             ctx.fillStyle = color;
             ctx.lineWidth = 2;
-            drawShape(target.x, target.y, target.radius, family.shape);
+            drawShape(target.x, target.y, target.radius * spawnScale, family.shape);
 
             ctx.globalAlpha = 1;
         }
