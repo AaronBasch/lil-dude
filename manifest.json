@@ -1,0 +1,10 @@
+{
+  "name": "unicycle_robot",
+  "short_name": "unicycle",
+  "description": "Arena survival game - eliminate shape-coded target families",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#08080c",
+  "theme_color": "#08080c"
+}

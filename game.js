@@ -1031,6 +1031,291 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
+// ============== TOUCH CONTROLS ==============
+
+// Detect touch device and add class to body
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+if (isTouchDevice) {
+    document.body.classList.add('touch-device');
+}
+
+// Start overlay handler - requests fullscreen and locks orientation
+const startOverlay = document.getElementById('startOverlay');
+if (startOverlay && isTouchDevice) {
+    startOverlay.addEventListener('click', async () => {
+        // Start audio
+        startAudio();
+
+        // Request fullscreen
+        try {
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) {
+                await elem.requestFullscreen();
+            } else if (elem.webkitRequestFullscreen) {
+                await elem.webkitRequestFullscreen();
+            }
+        } catch (e) {
+            // Fullscreen not supported or denied - continue anyway
+        }
+
+        // Try to lock orientation to landscape
+        try {
+            if (screen.orientation && screen.orientation.lock) {
+                await screen.orientation.lock('landscape');
+            }
+        } catch (e) {
+            // Orientation lock not supported - continue anyway
+        }
+
+        // Mark game as started (shows controls, hides overlay)
+        document.body.classList.add('game-started');
+
+        // Resize canvas for new dimensions
+        setTimeout(resizeCanvas, 100);
+    });
+}
+
+// Joystick state
+const joysticks = {
+    move: { active: false, touchId: null, startX: 0, startY: 0, currentX: 0, currentY: 0 },
+    attack: { active: false, touchId: null, startX: 0, startY: 0, currentX: 0, currentY: 0 }
+};
+
+// Get joystick elements
+const moveJoystick = document.getElementById('moveJoystick');
+const moveKnob = document.getElementById('moveKnob');
+const attackJoystick = document.getElementById('attackJoystick');
+const attackKnob = document.getElementById('attackKnob');
+const fastModeBtn = document.getElementById('fastModeBtn');
+
+// Joystick config
+const joystickRadius = 70; // Half of joystick zone width
+const deadzone = 0.2;
+
+function handleJoystickStart(joystickType, touch, zone) {
+    const rect = zone.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    joysticks[joystickType] = {
+        active: true,
+        touchId: touch.identifier,
+        startX: centerX,
+        startY: centerY,
+        currentX: touch.clientX,
+        currentY: touch.clientY
+    };
+
+    startAudio(); // Start audio on touch
+    updateJoystickVisual(joystickType);
+    updateKeysFromJoystick(joystickType);
+}
+
+function handleJoystickMove(joystickType, touch) {
+    if (!joysticks[joystickType].active) return;
+
+    joysticks[joystickType].currentX = touch.clientX;
+    joysticks[joystickType].currentY = touch.clientY;
+
+    updateJoystickVisual(joystickType);
+    updateKeysFromJoystick(joystickType);
+}
+
+function handleJoystickEnd(joystickType) {
+    joysticks[joystickType].active = false;
+    joysticks[joystickType].touchId = null;
+
+    // Reset knob position
+    const knob = joystickType === 'move' ? moveKnob : attackKnob;
+    knob.style.transform = 'translate(-50%, -50%)';
+
+    // Clear keys for this joystick
+    if (joystickType === 'move') {
+        keys['ArrowLeft'] = false;
+        keys['ArrowRight'] = false;
+        keys['ArrowUp'] = false;
+        keys['ArrowDown'] = false;
+    } else {
+        // Release attack
+        if (player.attackHeld) {
+            player.attackState = 'retracting';
+            player.attackProgress = 1;
+            player.attackHeld = null;
+        }
+        keys['w'] = false;
+        keys['a'] = false;
+        keys['s'] = false;
+        keys['d'] = false;
+    }
+}
+
+function updateJoystickVisual(joystickType) {
+    const js = joysticks[joystickType];
+    const knob = joystickType === 'move' ? moveKnob : attackKnob;
+
+    let dx = js.currentX - js.startX;
+    let dy = js.currentY - js.startY;
+
+    // Clamp to joystick radius
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const maxDist = joystickRadius - 30; // Keep knob inside
+    if (dist > maxDist) {
+        dx = (dx / dist) * maxDist;
+        dy = (dy / dist) * maxDist;
+    }
+
+    knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+}
+
+function updateKeysFromJoystick(joystickType) {
+    const js = joysticks[joystickType];
+
+    let dx = js.currentX - js.startX;
+    let dy = js.currentY - js.startY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Normalize
+    const normalizedDist = Math.min(dist / joystickRadius, 1);
+
+    if (normalizedDist < deadzone) {
+        // In deadzone - no input
+        if (joystickType === 'move') {
+            keys['ArrowLeft'] = false;
+            keys['ArrowRight'] = false;
+            keys['ArrowUp'] = false;
+            keys['ArrowDown'] = false;
+        }
+        return;
+    }
+
+    // Get angle
+    const angle = Math.atan2(dy, dx);
+
+    if (joystickType === 'move') {
+        // 4-way or 8-way movement based on angle
+        keys['ArrowRight'] = Math.cos(angle) > 0.3;
+        keys['ArrowLeft'] = Math.cos(angle) < -0.3;
+        keys['ArrowDown'] = Math.sin(angle) > 0.3;
+        keys['ArrowUp'] = Math.sin(angle) < -0.3;
+    } else {
+        // Attack - determine direction (4-way)
+        const pi = Math.PI;
+        let attackKey = null;
+
+        if (angle > -pi/4 && angle <= pi/4) attackKey = 'd'; // right
+        else if (angle > pi/4 && angle <= 3*pi/4) attackKey = 's'; // down
+        else if (angle > 3*pi/4 || angle <= -3*pi/4) attackKey = 'a'; // left
+        else attackKey = 'w'; // up
+
+        // Clear other attack keys
+        ['w', 'a', 's', 'd'].forEach(k => keys[k] = false);
+        keys[attackKey] = true;
+
+        // Trigger attack if not already attacking
+        if (player.attackState === 'idle' || player.attackHeld !== attackKey) {
+            player.attackState = 'jab-' + attackKey;
+            player.attackProgress = 0;
+            player.strikeTrail = [];
+            player.attackHeld = attackKey;
+        }
+    }
+}
+
+// Touch event handlers for move joystick
+if (moveJoystick) {
+    moveJoystick.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        handleJoystickStart('move', touch, moveJoystick);
+    }, { passive: false });
+}
+
+// Touch event handlers for attack joystick
+if (attackJoystick) {
+    attackJoystick.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        handleJoystickStart('attack', touch, attackJoystick);
+    }, { passive: false });
+}
+
+// Global touch move and end
+document.addEventListener('touchmove', (e) => {
+    for (const touch of e.changedTouches) {
+        if (joysticks.move.touchId === touch.identifier) {
+            handleJoystickMove('move', touch);
+        }
+        if (joysticks.attack.touchId === touch.identifier) {
+            handleJoystickMove('attack', touch);
+        }
+    }
+}, { passive: false });
+
+document.addEventListener('touchend', (e) => {
+    for (const touch of e.changedTouches) {
+        if (joysticks.move.touchId === touch.identifier) {
+            handleJoystickEnd('move');
+        }
+        if (joysticks.attack.touchId === touch.identifier) {
+            handleJoystickEnd('attack');
+        }
+    }
+});
+
+document.addEventListener('touchcancel', (e) => {
+    for (const touch of e.changedTouches) {
+        if (joysticks.move.touchId === touch.identifier) {
+            handleJoystickEnd('move');
+        }
+        if (joysticks.attack.touchId === touch.identifier) {
+            handleJoystickEnd('attack');
+        }
+    }
+});
+
+// Fast mode button
+if (fastModeBtn) {
+    fastModeBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        startAudio();
+        keys[' '] = true;
+        fastModeBtn.classList.add('active');
+    }, { passive: false });
+
+    fastModeBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        keys[' '] = false;
+        fastModeBtn.classList.remove('active');
+    }, { passive: false });
+}
+
+// ============== RESPONSIVE CANVAS ==============
+
+function resizeCanvas() {
+    const container = document.getElementById('gameContainer');
+    const maxWidth = window.innerWidth;
+    const maxHeight = window.innerHeight - (isTouchDevice ? 180 : 60); // Leave room for joysticks
+
+    const aspectRatio = 1200 / 600; // Original canvas aspect ratio
+
+    let newWidth = maxWidth;
+    let newHeight = newWidth / aspectRatio;
+
+    if (newHeight > maxHeight) {
+        newHeight = maxHeight;
+        newWidth = newHeight * aspectRatio;
+    }
+
+    canvas.style.width = newWidth + 'px';
+    canvas.style.height = newHeight + 'px';
+}
+
+// Resize on load and window resize
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ============== START GAME ==============
+
 // Initialize with starting level
 startLevel(DEBUG_START_LEVEL);
 

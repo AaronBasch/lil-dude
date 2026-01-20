@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>unicycle_robot</title>
+
+    <!-- PWA / Fullscreen support -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#08080c">
+
     <style>
         * {
             margin: 0;
@@ -11,40 +19,228 @@
             box-sizing: border-box;
         }
         body {
-            background: #000;
+            background: #08080c;
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
             font-family: monospace;
+            overflow: hidden;
+            touch-action: none;
         }
         #gameContainer {
             position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
         canvas {
             display: block;
             border: 1px solid #252535;
+            max-width: 100%;
+            max-height: 100%;
         }
         #controls {
             position: absolute;
-            bottom: -40px;
-            left: 0;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
             color: #404055;
             font-size: 10px;
             line-height: 1.6;
+            text-align: center;
+            white-space: nowrap;
         }
         #controls span {
             color: #555;
         }
+
+        /* Tap to start overlay - mobile only */
+        #startOverlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(8, 8, 12, 0.95);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: #606080;
+            font-size: 18px;
+            text-align: center;
+            padding: 20px;
+        }
+        #startOverlay .title {
+            color: #ffffff;
+            font-size: 28px;
+            margin-bottom: 30px;
+            letter-spacing: 2px;
+        }
+        #startOverlay .tap {
+            color: #808090;
+            font-size: 16px;
+            margin-top: 40px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+
+        /* Rotate device prompt */
+        #rotatePrompt {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(8, 8, 12, 0.98);
+            z-index: 1001;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: #606080;
+            font-size: 16px;
+            text-align: center;
+            padding: 20px;
+        }
+        #rotatePrompt .icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+            animation: rotate-hint 1.5s ease-in-out infinite;
+        }
+        @keyframes rotate-hint {
+            0%, 100% { transform: rotate(0deg); }
+            50% { transform: rotate(90deg); }
+        }
+
+        /* Virtual joysticks - hidden by default, shown on touch devices */
+        .joystick-zone {
+            display: none;
+            position: fixed;
+            bottom: 20px;
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            background: rgba(64, 64, 85, 0.3);
+            border: 2px solid rgba(64, 64, 85, 0.5);
+            touch-action: none;
+        }
+        .joystick-zone.left {
+            left: 20px;
+        }
+        .joystick-zone.right {
+            right: 20px;
+        }
+        .joystick-knob {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        .joystick-label {
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #404055;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        /* Fast mode button for mobile */
+        #fastModeBtn {
+            display: none;
+            position: fixed;
+            bottom: 180px;
+            right: 50px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: rgba(64, 64, 85, 0.3);
+            border: 2px solid rgba(64, 64, 85, 0.5);
+            color: #606080;
+            font-size: 10px;
+            font-family: monospace;
+            touch-action: none;
+        }
+        #fastModeBtn.active {
+            background: rgba(100, 100, 130, 0.5);
+            color: #ffffff;
+        }
+
+        /* Show touch controls on touch devices (after start) */
+        .touch-device.game-started .joystick-zone,
+        .touch-device.game-started #fastModeBtn {
+            display: block;
+        }
+        .touch-device #controls {
+            display: none;
+        }
+        .touch-device #startOverlay {
+            display: flex;
+        }
+        .touch-device.game-started #startOverlay {
+            display: none;
+        }
+
+        /* Show rotate prompt in portrait on mobile */
+        @media (orientation: portrait) {
+            .touch-device.game-started #rotatePrompt {
+                display: flex;
+            }
+            .touch-device.game-started .joystick-zone,
+            .touch-device.game-started #fastModeBtn,
+            .touch-device.game-started #gameContainer {
+                display: none;
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- Tap to start overlay -->
+    <div id="startOverlay">
+        <div class="title">UNICYCLE_ROBOT</div>
+        <div>Eliminate shape-coded target families</div>
+        <div class="tap">TAP TO START</div>
+    </div>
+
+    <!-- Rotate device prompt -->
+    <div id="rotatePrompt">
+        <div class="icon">📱</div>
+        <div>Rotate device to landscape</div>
+    </div>
+
     <div id="gameContainer">
         <canvas id="game"></canvas>
         <div id="controls">
-            <span>$</span> arrows=move | WASD=jab (hold to extend) | Space=fast mode | kill all family members to eliminate
+            <span>$</span> arrows=move | WASD=jab (hold to extend) | Space=fast mode
         </div>
     </div>
+
+    <!-- Virtual joysticks for mobile -->
+    <div class="joystick-zone left" id="moveJoystick">
+        <div class="joystick-knob" id="moveKnob"></div>
+        <div class="joystick-label">move</div>
+    </div>
+    <div class="joystick-zone right" id="attackJoystick">
+        <div class="joystick-knob" id="attackKnob"></div>
+        <div class="joystick-label">attack</div>
+    </div>
+    <button id="fastModeBtn">FAST</button>
+
     <script src="game.js"></script>
 </body>
 </html>
