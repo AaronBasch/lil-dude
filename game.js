@@ -594,7 +594,7 @@ function hitFamilyMember(target, family) {
         vulnerability.familyId = null;
 
         // Family elimination effects
-        freezeFrames = 4; // Brief freeze (~67ms at 60fps)
+        // freezeFrames = 4; // Disabled - felt jarring
 
         // Bigger shake for family elimination
         player.screenShake.x = (Math.random() - 0.5) * (6 + familySize * 2);
