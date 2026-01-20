@@ -1300,26 +1300,33 @@ if (fastModeBtn) {
 // ============== RESPONSIVE CANVAS ==============
 
 function resizeCanvas() {
-    const container = document.getElementById('gameContainer');
     const maxWidth = window.innerWidth;
-    const maxHeight = window.innerHeight - (isTouchDevice ? 180 : 60); // Leave room for joysticks
+    const maxHeight = window.innerHeight;
 
-    const aspectRatio = 1200 / 600; // Original canvas aspect ratio
+    const aspectRatio = 1200 / 600; // Original canvas aspect ratio (2:1)
 
-    let newWidth = maxWidth;
-    let newHeight = newWidth / aspectRatio;
+    let newWidth, newHeight;
 
-    if (newHeight > maxHeight) {
+    // Fit to screen while maintaining aspect ratio
+    if (maxWidth / maxHeight > aspectRatio) {
+        // Screen is wider than canvas aspect ratio - fit to height
         newHeight = maxHeight;
         newWidth = newHeight * aspectRatio;
+    } else {
+        // Screen is taller than canvas aspect ratio - fit to width
+        newWidth = maxWidth;
+        newHeight = newWidth / aspectRatio;
     }
 
     canvas.style.width = newWidth + 'px';
     canvas.style.height = newHeight + 'px';
 }
 
-// Resize on load and window resize
+// Resize on load, orientation change, and window resize
 window.addEventListener('resize', resizeCanvas);
+window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for iOS orientation change
+});
 resizeCanvas();
 
 // ============== START GAME ==============
