@@ -1042,11 +1042,13 @@ if (isTouchDevice) {
 // Start overlay handler - requests fullscreen and locks orientation
 const startOverlay = document.getElementById('startOverlay');
 if (startOverlay && isTouchDevice) {
-    startOverlay.addEventListener('click', async () => {
+    const handleStart = async (e) => {
+        e.preventDefault();
+
         // Start audio
         startAudio();
 
-        // Request fullscreen
+        // Request fullscreen (won't work on iOS but that's ok)
         try {
             const elem = document.documentElement;
             if (elem.requestFullscreen) {
@@ -1058,7 +1060,7 @@ if (startOverlay && isTouchDevice) {
             // Fullscreen not supported or denied - continue anyway
         }
 
-        // Try to lock orientation to landscape
+        // Try to lock orientation to landscape (won't work on iOS)
         try {
             if (screen.orientation && screen.orientation.lock) {
                 await screen.orientation.lock('landscape');
@@ -1072,7 +1074,11 @@ if (startOverlay && isTouchDevice) {
 
         // Resize canvas for new dimensions
         setTimeout(resizeCanvas, 100);
-    });
+    };
+
+    // Use both touchend and click for maximum compatibility
+    startOverlay.addEventListener('touchend', handleStart, { passive: false });
+    startOverlay.addEventListener('click', handleStart);
 }
 
 // Joystick state
@@ -1127,7 +1133,7 @@ function handleJoystickEnd(joystickType) {
 
     // Reset knob position
     const knob = joystickType === 'move' ? moveKnob : attackKnob;
-    knob.style.transform = 'translate(-50%, -50%)';
+    if (knob) knob.style.transform = 'translate(-50%, -50%)';
 
     // Clear keys for this joystick
     if (joystickType === 'move') {
@@ -1152,6 +1158,7 @@ function handleJoystickEnd(joystickType) {
 function updateJoystickVisual(joystickType) {
     const js = joysticks[joystickType];
     const knob = joystickType === 'move' ? moveKnob : attackKnob;
+    if (!knob) return;
 
     let dx = js.currentX - js.startX;
     let dy = js.currentY - js.startY;
@@ -1241,6 +1248,7 @@ if (attackJoystick) {
 
 // Global touch move and end
 document.addEventListener('touchmove', (e) => {
+    e.preventDefault(); // Prevent iOS scroll/bounce
     for (const touch of e.changedTouches) {
         if (joysticks.move.touchId === touch.identifier) {
             handleJoystickMove('move', touch);
