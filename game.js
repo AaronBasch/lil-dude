@@ -1300,26 +1300,30 @@ if (fastModeBtn) {
 // ============== RESPONSIVE CANVAS ==============
 
 function resizeCanvas() {
-    const maxWidth = window.innerWidth;
-    const maxHeight = window.innerHeight;
-
-    const aspectRatio = 1200 / 600; // Original canvas aspect ratio (2:1)
-
-    let newWidth, newHeight;
-
-    // Fit to screen while maintaining aspect ratio
-    if (maxWidth / maxHeight > aspectRatio) {
-        // Screen is wider than canvas aspect ratio - fit to height
-        newHeight = maxHeight;
-        newWidth = newHeight * aspectRatio;
+    // On mobile, fill the entire screen
+    // On desktop, maintain aspect ratio
+    if (isTouchDevice) {
+        // Fill screen on mobile (slight padding for joysticks)
+        canvas.style.width = '100vw';
+        canvas.style.height = '100vh';
     } else {
-        // Screen is taller than canvas aspect ratio - fit to width
-        newWidth = maxWidth;
-        newHeight = newWidth / aspectRatio;
-    }
+        // Desktop: maintain aspect ratio
+        const maxWidth = window.innerWidth;
+        const maxHeight = window.innerHeight - 60;
+        const aspectRatio = 1200 / 600;
 
-    canvas.style.width = newWidth + 'px';
-    canvas.style.height = newHeight + 'px';
+        let newWidth, newHeight;
+        if (maxWidth / maxHeight > aspectRatio) {
+            newHeight = maxHeight;
+            newWidth = newHeight * aspectRatio;
+        } else {
+            newWidth = maxWidth;
+            newHeight = newWidth / aspectRatio;
+        }
+
+        canvas.style.width = newWidth + 'px';
+        canvas.style.height = newHeight + 'px';
+    }
 }
 
 // Resize on load, orientation change, and window resize
