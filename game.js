@@ -1039,6 +1039,37 @@ if (isTouchDevice) {
     document.body.classList.add('touch-device');
 }
 
+// Check if already running as installed PWA
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+
+// PWA install prompt (Android Chrome)
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+
+    // Update hint to show install button
+    const hint = document.getElementById('installHint');
+    if (hint) {
+        hint.innerHTML = '<span id="installBtn" style="text-decoration:underline;cursor:pointer">Tap here to install fullscreen app</span>';
+        document.getElementById('installBtn').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const result = await deferredPrompt.userChoice;
+                deferredPrompt = null;
+            }
+        });
+    }
+});
+
+// Hide hint if already installed
+if (isStandalone) {
+    const hint = document.getElementById('installHint');
+    if (hint) hint.style.display = 'none';
+}
+
 // Start overlay handler - requests fullscreen and locks orientation
 const startOverlay = document.getElementById('startOverlay');
 if (startOverlay && isTouchDevice) {

@@ -90,9 +90,20 @@
             animation: pulse 2s infinite;
         }
         #startOverlay .hint {
-            color: #404050;
-            font-size: 11px;
+            color: #505060;
+            font-size: 12px;
             margin-top: 30px;
+            line-height: 1.6;
+        }
+        #startOverlay .hint .icon {
+            font-size: 16px;
+            vertical-align: middle;
+        }
+        /* Hide hint if running as installed PWA */
+        @media (display-mode: standalone) {
+            #startOverlay .hint {
+                display: none;
+            }
         }
         @keyframes pulse {
             0%, 100% { opacity: 0.5; }
@@ -225,7 +236,9 @@
         <div class="title">UNICYCLE_ROBOT</div>
         <div>Eliminate shape-coded target families</div>
         <div class="tap">TAP TO START</div>
-        <div class="hint">For fullscreen: Share → Add to Home Screen</div>
+        <div class="hint" id="installHint">
+            Fullscreen: tap <span class="icon">⬆️</span> then "Add to Home Screen"
+        </div>
     </div>
 
     <!-- Rotate device prompt -->
